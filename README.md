@@ -85,7 +85,6 @@ npm run dist:portable
 - `start.bat` — запуск лаунчера.
 - `build.bat` — компиляция TypeScript и Vite.
 - `build_exe.bat` — сборка автономного EXE-файла с использованием зеркал зависимостей.
-- `push_to_github.bat` — отправка изменений в удаленный репозиторий GitHub.
 
 ## Структура проекта
 
