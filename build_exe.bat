@@ -4,11 +4,12 @@ echo ===================================================
 echo     Создание исполняемого файла EXE (ZLauncher)
 echo ===================================================
 echo.
-call npm run dist
+set ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
+call npm run dist:portable
 if %errorlevel% equ 0 (
     echo.
     echo ===================================================
-    echo  EXE успешно создан в папке release/!
+    echo  EXE успешно создан: release\ZLauncher 1.0.0.exe
     echo ===================================================
 ) else (
     echo.

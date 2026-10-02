@@ -52,6 +52,7 @@
     "appId": "com.zlauncher.app",
     "productName": "ZLauncher",
     "copyright": "Copyright © 2026 ZLauncher Team",
+    "electronDist": "node_modules/electron/dist",
     "directories": {
       "output": "release"
     },
