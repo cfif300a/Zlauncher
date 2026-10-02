@@ -36,37 +36,42 @@ export const SkinsView: React.FC<SkinsViewProps> = ({
   const [searching, setSearching] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  // Preset skins
+  // Preset skins (tested & guaranteed to load)
   const presets = [
     {
       name: 'Стив (Классика)',
-      url: 'https://textures.minecraft.net/texture/414e8a4a5be434f0e5eb9816008b4eb9d8463e26bb1785de11cf3fa244ee1a8f',
+      url: 'https://minotar.net/skin/MHF_Steve',
       type: 'classic',
     },
     {
       name: 'Алекс (Слим)',
-      url: 'https://textures.minecraft.net/texture/3f395f19036c646b5a32ec393165b40cf5fc05a9632eb5ee1722883492eb919a',
+      url: 'https://minotar.net/skin/MHF_Alex',
       type: 'slim',
     },
     {
-      name: 'Неоновый Рыцарь',
-      url: 'https://textures.minecraft.net/texture/261019ba714578bce067759a224f8d22cbeee4ce21efc0a68d8745d44866f7f',
+      name: 'Notch (Классика)',
+      url: 'https://minotar.net/skin/Notch',
       type: 'classic',
     },
     {
-      name: 'Эндермен',
-      url: 'https://textures.minecraft.net/texture/76a4a2119bb9f33bf9ebcc0cfcfcbfae109d73d9c73336cc2b28cbe9426f',
+      name: 'Technoblade',
+      url: 'https://minotar.net/skin/Technoblade',
       type: 'classic',
     },
     {
-      name: 'Алмазный Воин',
-      url: 'https://textures.minecraft.net/texture/a55ba862ca96b6d510834fc3e527d4c82b476bf3289dc62a1e39a3f4e15da6e1',
+      name: 'Dream',
+      url: 'https://minotar.net/skin/Dream',
       type: 'classic',
     },
     {
-      name: 'Кибер Ниндзя',
-      url: 'https://textures.minecraft.net/texture/d9b4b92b67f1ee0617eb04b79bca6899b80fa540026e9eb1011689ea5c71d604',
-      type: 'slim',
+      name: 'Grian',
+      url: 'https://minotar.net/skin/Grian',
+      type: 'classic',
+    },
+    {
+      name: 'DanTDM',
+      url: 'https://minotar.net/skin/DanTDM',
+      type: 'classic',
     },
   ];
 

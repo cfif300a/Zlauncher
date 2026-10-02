@@ -19,6 +19,8 @@ export interface LaunchConfig {
     height: number;
     fullscreen: boolean;
   };
+  skinUrl?: string;
+  skinType?: 'classic' | 'slim';
 }
 
 export function getOfflineUUID(username: string): string {

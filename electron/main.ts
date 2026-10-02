@@ -4,6 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import { execSync } from 'child_process';
 import { MinecraftLauncher, getDefaultGameDir, LaunchConfig } from './launcher';
+import { installOfflineSkin } from './skins';
 
 let mainWindow: BrowserWindow | null = null;
 const launcher = new MinecraftLauncher();
@@ -358,18 +359,40 @@ ipcMain.handle('get-config', () => {
   return loadConfig();
 });
 
-ipcMain.handle('save-config', (_event, cfg) => {
+ipcMain.handle('save-config', async (_event, cfg) => {
   const current = loadConfig();
   const baseDir = cfg.gameDir || current.gameDir || getDefaultGameDir();
   const mergedInstances = syncInstancesFromDisk(
     [...(current.instances || []), ...(cfg.instances || [])],
     baseDir
   );
-  return saveConfig({
+  const updated = {
     ...current,
     ...cfg,
     instances: mergedInstances,
-  });
+  };
+  const saved = saveConfig(updated);
+
+  // If a skin URL was updated, pre-generate the offline skin pack immediately
+  if (cfg.skinUrl) {
+    try {
+      const activeInst = (updated.instances || []).find((i: any) => i.id === updated.activeInstanceId);
+      const instDir = activeInst && activeInst.id !== 'default'
+        ? path.join(baseDir, 'instances', activeInst.id)
+        : baseDir;
+
+      installOfflineSkin({
+        gameDir: instDir,
+        rootGameDir: baseDir,
+        skinUrl: cfg.skinUrl,
+        skinType: cfg.skinType || updated.skinType || 'classic',
+        versionId: activeInst?.versionId || updated.selectedVersion || '26.3',
+        username: updated.username || 'Player',
+      }).catch((e) => console.warn('[Skin Save Note]', e));
+    } catch (e) {}
+  }
+
+  return saved;
 });
 
 ipcMain.handle('get-system-info', () => {
@@ -565,6 +588,39 @@ ipcMain.handle('launch-game', async (_event, options: LaunchConfig) => {
     } else {
       jPath = 'java';
     }
+  }
+
+  // Inject offline player skin for singleplayer
+  try {
+    const effectiveSkinUrl = (options as any).skinUrl || cfg.skinUrl;
+    const effectiveSkinType = (options as any).skinType || cfg.skinType || 'classic';
+    const effectiveVersion = activeInst?.versionId || options.versionId;
+    const effectiveUsername = options.username || cfg.username || 'Player';
+
+    if (effectiveSkinUrl) {
+      mainWindow?.webContents.send('console-log', {
+        type: 'system',
+        text: `[ZLauncher] Подготовка скина "${effectiveUsername}" для одиночной игры...`,
+        timestamp: new Date().toLocaleTimeString(),
+      });
+
+      await installOfflineSkin({
+        gameDir: instanceGameDir,
+        rootGameDir: baseDir,
+        skinUrl: effectiveSkinUrl,
+        skinType: effectiveSkinType,
+        versionId: effectiveVersion,
+        username: effectiveUsername,
+      });
+
+      mainWindow?.webContents.send('console-log', {
+        type: 'system',
+        text: `[ZLauncher] Скин игрока успешно внедрен в ZLauncherSkinPack и активирован в options.txt`,
+        timestamp: new Date().toLocaleTimeString(),
+      });
+    }
+  } catch (skinErr) {
+    console.warn('[Skin Launch Warning]', skinErr);
   }
 
   const result = await launcher.prepareAndLaunch(
@@ -1025,16 +1081,29 @@ ipcMain.handle('ping-server', async (_event, ip: string, port: number = 25565) =
 
 // IPC: Skins
 ipcMain.handle('fetch-player-skin', async (_event, username: string) => {
+  const cleanNick = (username || '').trim();
+  if (!cleanNick) return null;
+
+  // 1. Try Ely.by textures endpoint
   try {
-    const elyUrl = `https://skins.ely.by/skins/${encodeURIComponent(username)}.png`;
-    const res = await fetch(elyUrl, { method: 'HEAD' });
-    if (res.ok) {
-      return { skinUrl: elyUrl, isSlim: false, source: 'ely.by' };
+    const elyRes = await fetch(`http://skinsystem.ely.by/textures/${encodeURIComponent(cleanNick)}`, {
+      headers: { 'User-Agent': 'ZLauncher/1.0.0' },
+    });
+    if (elyRes.ok && elyRes.status === 200) {
+      const elyData = (await elyRes.json()) as any;
+      if (elyData && elyData.skin?.url) {
+        return {
+          skinUrl: elyData.skin.url,
+          isSlim: elyData.skin?.metadata?.model === 'slim',
+          source: 'ely.by',
+        };
+      }
     }
   } catch (e) {}
 
+  // 2. Standard Minotar / Mojang endpoint
   return {
-    skinUrl: `https://minotar.net/skin/${encodeURIComponent(username)}`,
+    skinUrl: `https://minotar.net/skin/${encodeURIComponent(cleanNick)}`,
     isSlim: false,
     source: 'mojang',
   };

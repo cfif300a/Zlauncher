@@ -273,6 +273,8 @@ export const App: React.FC = () => {
         jvmArgs: config.customJvmArgs,
         resolution: config.resolution,
         instanceId: activeInstance?.id,
+        skinUrl: config.skinUrl,
+        skinType: config.skinType,
       });
 
       if (!res.success) {

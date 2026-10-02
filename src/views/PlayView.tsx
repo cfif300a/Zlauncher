@@ -14,7 +14,7 @@ import {
   Plus,
   FolderGit2,
   Check,
-  Award,
+  Shirt,
   Flame,
   Radio,
 } from 'lucide-react';
@@ -177,9 +177,9 @@ export const PlayView: React.FC<PlayViewProps> = ({
       </div>
 
       {/* Center Section: 3D Character Stage & HUD Metrics */}
-      <div className="relative z-10 flex items-center justify-between my-auto py-2">
+      <div className="relative z-10 flex items-center justify-around my-auto py-3">
         {/* HUD Metric Cards (Left Column) */}
-        <div className="grid grid-cols-2 gap-3 w-84">
+        <div className="grid grid-cols-2 gap-3.5 w-96">
           {/* RAM Card */}
           <div
             onClick={onOpenSettings}
@@ -231,69 +231,41 @@ export const PlayView: React.FC<PlayViewProps> = ({
             <div className="text-[10px] text-amber-300/80 mt-2 truncate">В папке экземпляра</div>
           </div>
 
-          {/* Account Profile Card */}
+          {/* Skin Status Card */}
           <div className="glass-card p-4 rounded-3xl">
             <div className="flex items-center justify-between text-slate-400 mb-1.5">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Игрок
+                Скин игрока
               </span>
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <Shirt className="w-4 h-4 text-emerald-400" />
             </div>
-            <div className="text-base font-black text-white truncate font-mono">{config.username}</div>
-            <div className="text-[10px] text-emerald-400 font-mono mt-2">Офлайн UUID</div>
+            <div className="text-base font-black text-white truncate capitalize">
+              {config.skinType === 'slim' ? 'Слим (3px)' : 'Классик (4px)'}
+            </div>
+            <div className="flex items-center gap-1.5 mt-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[10px] text-emerald-300 font-mono">Одиночная игра</span>
+            </div>
           </div>
         </div>
 
-        {/* 3D Character Stage (Center) */}
+        {/* 3D Character Stage (Center / Showcase) */}
         <div className="relative flex flex-col items-center">
-          <SkinViewer3D
-            skinUrl={config.skinUrl}
-            isSlim={config.skinType === 'slim'}
-            width={280}
-            height={360}
-            animation={isGameRunning ? 'run' : 'idle'}
-            interactive={true}
-          />
-          <div className="text-[11px] text-slate-500 mt-3 flex items-center gap-1.5 font-medium">
+          <div className="relative">
+            <div className="absolute inset-0 bg-emerald-500/10 blur-3xl rounded-full scale-95 pointer-events-none" />
+            <SkinViewer3D
+              skinUrl={config.skinUrl}
+              isSlim={config.skinType === 'slim'}
+              width={300}
+              height={380}
+              animation={isGameRunning ? 'run' : 'idle'}
+              interactive={true}
+            />
+          </div>
+          <div className="text-[11px] text-slate-500 mt-2.5 flex items-center gap-1.5 font-medium">
             <span>Вращайте модель мышью</span>
             <span className="text-slate-600">•</span>
             <span className="text-slate-400">Двойной клик — сброс</span>
-          </div>
-        </div>
-
-        {/* Experience & Level Card (Right Column) */}
-        <div className="w-80 space-y-3">
-          <div className="glass-card p-5 rounded-3xl space-y-3 relative overflow-hidden">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Award className="w-5 h-5 text-amber-400" />
-                <span className="text-xs font-black uppercase tracking-wider text-slate-300">
-                  Профиль Игрока
-                </span>
-              </div>
-              <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                Уровень 45
-              </span>
-            </div>
-
-            {/* EXP Bar */}
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
-                <span>Опыт Minecraft</span>
-                <span className="text-emerald-400 font-bold">4,520 / 5,000 XP</span>
-              </div>
-              <div className="w-full h-2 rounded-full bg-black/50 overflow-hidden p-0.5 border border-white/5">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-lime-400 to-emerald-400 shadow-[0_0_10px_#10b981]"
-                  style={{ width: '88%' }}
-                />
-              </div>
-            </div>
-
-            <div className="pt-2 border-t border-white/[0.05] text-[11px] text-slate-400 flex items-center justify-between">
-              <span className="text-slate-500">Звание:</span>
-              <span className="text-slate-200 font-bold">Алмазный Ветеран</span>
-            </div>
           </div>
         </div>
       </div>
