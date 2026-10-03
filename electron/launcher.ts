@@ -510,6 +510,24 @@ export class MinecraftLauncher {
     return allowed;
   }
 
+  private extractArgumentValues(argEntry: any): string[] {
+    if (typeof argEntry === 'string') {
+      return [argEntry];
+    }
+    if (argEntry && typeof argEntry === 'object') {
+      if (argEntry.rules && !this.isRuleAllowed(argEntry.rules)) {
+        return [];
+      }
+      if (typeof argEntry.value === 'string') {
+        return [argEntry.value];
+      }
+      if (Array.isArray(argEntry.value)) {
+        return argEntry.value.filter((v: any) => typeof v === 'string');
+      }
+    }
+    return [];
+  }
+
   public async prepareAndLaunch(
     config: LaunchConfig,
     onProgress: (info: { status: string; progress: number; current?: number; total?: number; details?: string }) => void,
@@ -604,13 +622,21 @@ export class MinecraftLauncher {
 
       // 1. Download Client JAR
       onProgress({ status: 'Проверка игрового клиента (client.jar)...', progress: 15 });
-      const clientJarName = `${inheritedData ? versionData.inheritsFrom : versionId}.jar`;
-      const clientJarPath = path.join(inheritedData ? path.join(versionsDir, versionData.inheritsFrom) : versionDir, clientJarName);
+      const vanillaVersionId = versionData.inheritsFrom || (inheritedData ? inheritedData.id : null) || versionId;
+      const vanillaJarDir = path.join(versionsDir, vanillaVersionId);
+      const vanillaJarPath = path.join(vanillaJarDir, `${vanillaVersionId}.jar`);
 
       const clientDownload = inheritedData?.downloads?.client || versionData?.downloads?.client;
-      if (clientDownload && !fs.existsSync(clientJarPath)) {
+      if (clientDownload && !fs.existsSync(vanillaJarPath)) {
         onProgress({ status: 'Загрузка игрового клиента (client.jar)...', progress: 20 });
-        await this.downloader.downloadFile(clientDownload.url, clientJarPath, clientDownload.sha1);
+        fs.mkdirSync(vanillaJarDir, { recursive: true });
+        await this.downloader.downloadFile(clientDownload.url, vanillaJarPath, clientDownload.sha1);
+      }
+
+      const loaderJarPath = path.join(versionDir, `${versionId}.jar`);
+      if (versionId !== vanillaVersionId && versionData.downloads?.client && !fs.existsSync(loaderJarPath)) {
+        fs.mkdirSync(versionDir, { recursive: true });
+        await this.downloader.downloadFile(versionData.downloads.client.url, loaderJarPath, versionData.downloads.client.sha1);
       }
 
       // 2. Resolve and download Libraries & Natives
@@ -764,7 +790,33 @@ export class MinecraftLauncher {
 
       // 4. Construct Command Arguments
       onProgress({ status: 'Формирование параметров запуска...', progress: 95 });
-      classpath.push(clientJarPath);
+
+      // Always guarantee the vanilla client jar is in classpath (required by CustomSkinLoader, Fabric Knot, Forge)
+      if (fs.existsSync(vanillaJarPath) && !classpath.includes(vanillaJarPath)) {
+        classpath.push(vanillaJarPath);
+      }
+      if (versionId !== vanillaVersionId && fs.existsSync(loaderJarPath) && !classpath.includes(loaderJarPath)) {
+        classpath.push(loaderJarPath);
+      }
+
+      // Mirror version files into instance directory if isolated instance so mods can locate version.json
+      if (gameDir !== rootGameDir) {
+        try {
+          const instVanillaVerDir = path.join(gameDir, 'versions', vanillaVersionId);
+          fs.mkdirSync(instVanillaVerDir, { recursive: true });
+          const instVanillaJar = path.join(instVanillaVerDir, `${vanillaVersionId}.jar`);
+          const instVanillaJson = path.join(instVanillaVerDir, `${vanillaVersionId}.json`);
+          if (!fs.existsSync(instVanillaJar) && fs.existsSync(vanillaJarPath)) {
+            fs.copyFileSync(vanillaJarPath, instVanillaJar);
+          }
+          const rootVanillaJson = path.join(vanillaJarDir, `${vanillaVersionId}.json`);
+          if (!fs.existsSync(instVanillaJson) && fs.existsSync(rootVanillaJson)) {
+            fs.copyFileSync(rootVanillaJson, instVanillaJson);
+          }
+        } catch (mirrorErr) {
+          console.warn('[ZLauncher] Instance version mirror notice:', mirrorErr);
+        }
+      }
 
       const mainClass = versionData.mainClass || inheritedData?.mainClass || 'net.minecraft.client.main.Main';
       const offlineUUID = getOfflineUUID(config.username);
@@ -794,38 +846,48 @@ export class MinecraftLauncher {
       }
 
       // Add modern version JVM arguments if present
-      const versionJvmArgs = versionData.arguments?.jvm || inheritedData?.arguments?.jvm;
-      if (Array.isArray(versionJvmArgs)) {
-        for (const item of versionJvmArgs) {
-          if (typeof item === 'string') {
-            const replaced = item
-              .replace('${natives_directory}', nativesDir)
-              .replace('${launcher_name}', 'ZLauncher')
-              .replace('${launcher_version}', '1.0.0')
-              .replace('${classpath}', classpath.join(';'));
-            if (!jvmArgs.includes(replaced)) {
-              jvmArgs.push(replaced);
-            }
+      let hasCpInJvmArgs = false;
+      const rawJvmArgs = [
+        ...(Array.isArray(inheritedData?.arguments?.jvm) ? inheritedData.arguments.jvm : []),
+        ...(Array.isArray(versionData.arguments?.jvm) ? versionData.arguments.jvm : []),
+      ];
+      for (const item of rawJvmArgs) {
+        const values = this.extractArgumentValues(item);
+        for (const val of values) {
+          if (val === '-cp' || val === '-classpath' || val.includes('${classpath}')) {
+            hasCpInJvmArgs = true;
+          }
+          const replaced = val
+            .replace('${natives_directory}', nativesDir)
+            .replace('${launcher_name}', 'ZLauncher')
+            .replace('${launcher_version}', '1.0.0')
+            .replace('${classpath}', classpath.join(path.delimiter));
+          if (!jvmArgs.includes(replaced)) {
+            jvmArgs.push(replaced);
           }
         }
       }
 
-      // Classpath
-      jvmArgs.push('-cp', classpath.join(';'));
+      // Only append -cp if modern JVM arguments didn't already supply it
+      if (!hasCpInJvmArgs && !jvmArgs.includes('-cp')) {
+        jvmArgs.push('-cp', classpath.join(path.delimiter));
+      }
 
       // Main class
       const launchCommandArgs = [...jvmArgs, mainClass];
 
       // Game arguments
       const gameArgs: string[] = [];
-      const versionGameArgs = versionData.arguments?.game || inheritedData?.arguments?.game;
+      const rawGameArgs = [
+        ...(Array.isArray(inheritedData?.arguments?.game) ? inheritedData.arguments.game : []),
+        ...(Array.isArray(versionData.arguments?.game) ? versionData.arguments.game : []),
+      ];
 
-      if (Array.isArray(versionGameArgs)) {
+      if (rawGameArgs.length > 0) {
         // Modern format
-        for (const arg of versionGameArgs) {
-          if (typeof arg === 'string') {
-            gameArgs.push(arg);
-          }
+        for (const arg of rawGameArgs) {
+          const values = this.extractArgumentValues(arg);
+          gameArgs.push(...values);
         }
       } else if (versionData.minecraftArguments || inheritedData?.minecraftArguments) {
         // Legacy format
@@ -847,7 +909,7 @@ export class MinecraftLauncher {
       }
 
       // Replace placeholders in game arguments
-      const assetIndexName = assetIndex ? assetIndex.id : versionId;
+      const assetIndexName = assetIndex ? assetIndex.id : (inheritedData?.assetIndex?.id || versionId);
       for (let i = 0; i < gameArgs.length; i++) {
         let arg = gameArgs[i];
         arg = arg
@@ -859,7 +921,9 @@ export class MinecraftLauncher {
           .replace('${auth_uuid}', offlineUUID)
           .replace('${auth_access_token}', '0')
           .replace('${user_type}', 'mojang')
-          .replace('${version_type}', 'release');
+          .replace('${version_type}', 'release')
+          .replace('${clientid}', '0')
+          .replace('${auth_xuid}', '0');
 
         if (config.resolution) {
           arg = arg
@@ -870,17 +934,60 @@ export class MinecraftLauncher {
         gameArgs[i] = arg;
       }
 
+      // Mandatory guarantees: Minecraft MUST have these parameters regardless of version format quirks
+      const ensureArg = (flag: string, value: string) => {
+        const idx = gameArgs.indexOf(flag);
+        if (idx === -1) {
+          gameArgs.push(flag, value);
+        } else if (idx + 1 < gameArgs.length) {
+          const next = gameArgs[idx + 1];
+          if (!next || next.startsWith('${') || next === 'undefined') {
+            gameArgs[idx + 1] = value;
+          }
+        } else {
+          gameArgs.push(value);
+        }
+      };
+
+      ensureArg('--username', config.username);
+      ensureArg('--uuid', offlineUUID);
+      ensureArg('--version', versionId);
+      ensureArg('--gameDir', gameDir);
+      ensureArg('--assetsDir', assetsDir);
+      ensureArg('--assetIndex', assetIndexName);
+      ensureArg('--accessToken', '0');
+      ensureArg('--userType', 'mojang');
+      ensureArg('--versionType', 'release');
+
       // Resolution flags
       if (config.resolution) {
         if (config.resolution.fullscreen) {
-          gameArgs.push('--fullscreen');
+          if (!gameArgs.includes('--fullscreen')) {
+            gameArgs.push('--fullscreen');
+          }
         } else {
-          gameArgs.push('--width', config.resolution.width.toString());
-          gameArgs.push('--height', config.resolution.height.toString());
+          ensureArg('--width', config.resolution.width.toString());
+          ensureArg('--height', config.resolution.height.toString());
         }
       }
 
-      launchCommandArgs.push(...gameArgs);
+      // Clean up unresolved optional placeholders and disallowed demo mode
+      const finalGameArgs: string[] = [];
+      for (let i = 0; i < gameArgs.length; i++) {
+        const arg = gameArgs[i];
+        if (arg === '--demo') {
+          continue;
+        }
+        if (arg.startsWith('${') && arg.endsWith('}')) {
+          if (finalGameArgs.length > 0 && finalGameArgs[finalGameArgs.length - 1].startsWith('--')) {
+            finalGameArgs.pop();
+          }
+          continue;
+        }
+        finalGameArgs.push(arg);
+      }
+
+      launchCommandArgs.push(...finalGameArgs);
 
       // 5. Spawn Java process in instance directory
       onProgress({ status: 'Запуск Minecraft...', progress: 100 });

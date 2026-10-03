@@ -9,7 +9,15 @@ export interface SkinInstallOptions {
   skinType: 'classic' | 'slim';
   versionId: string;
   username: string;
+  httpPort?: number;
+  isModded?: boolean;
 }
+
+export const CSL_UNIVERSAL_JAR = 'CustomSkinLoader_Universal-15.0.1.jar';
+export const CSL_DOWNLOAD_URLS = [
+  'https://cdn.modrinth.com/data/idMHQ4n2/versions/OLaesh5y/CustomSkinLoader_Universal-15.0.1.jar',
+  'https://github.com/xfl03/MCCustomSkinLoader/releases/download/15.0.1/CustomSkinLoader_Universal-15.0.1.jar',
+];
 
 export function getPackFormat(mcVersion: string): number {
   if (!mcVersion) return 48;
@@ -37,7 +45,6 @@ export function getPackFormat(mcVersion: string): number {
 
 export async function resolveSkinBuffer(skinUrl?: string): Promise<Buffer | null> {
   if (!skinUrl || !skinUrl.trim()) {
-    // Default fallback to high quality Steve skin
     try {
       const res = await fetch('https://minotar.net/skin/MHF_Steve', {
         headers: { 'User-Agent': 'ZLauncher/1.0.0' },
@@ -99,7 +106,6 @@ export function enableSkinPackInOptions(gameDir: string): void {
       content = fs.readFileSync(optionsPath, 'utf8');
     }
 
-    // 1. Update resourcePacks
     const rpRegex = /^resourcePacks:(.*)$/m;
     const rpMatch = content.match(rpRegex);
 
@@ -107,13 +113,10 @@ export function enableSkinPackInOptions(gameDir: string): void {
       try {
         let packs: string[] = JSON.parse(rpMatch[1]);
         if (!Array.isArray(packs)) packs = [];
-        // Ensure vanilla is first
         if (!packs.includes('vanilla')) {
           packs.unshift('vanilla');
         }
-        // Remove old occurrences
         packs = packs.filter((p) => p !== targetPackName && p !== 'ZLauncherSkinPack' && p !== `${targetPackName}.zip`);
-        // Append at the end for highest priority override!
         packs.push(targetPackName);
         content = content.replace(rpRegex, `resourcePacks:${JSON.stringify(packs)}`);
       } catch (e) {
@@ -126,7 +129,6 @@ export function enableSkinPackInOptions(gameDir: string): void {
       content += `resourcePacks:["vanilla","${targetPackName}"]\n`;
     }
 
-    // 2. Update incompatibleResourcePacks (so Minecraft won't warn or uncheck)
     const irpRegex = /^incompatibleResourcePacks:(.*)$/m;
     const irpMatch = content.match(irpRegex);
 
@@ -150,6 +152,156 @@ export function enableSkinPackInOptions(gameDir: string): void {
   }
 }
 
+export function disableSkinPackInOptions(gameDir: string): void {
+  const optionsPath = path.join(gameDir, 'options.txt');
+  const targetPackName = 'file/ZLauncherSkinPack';
+
+  try {
+    if (!fs.existsSync(optionsPath)) return;
+    let content = fs.readFileSync(optionsPath, 'utf8');
+
+    const rpRegex = /^resourcePacks:(.*)$/m;
+    const rpMatch = content.match(rpRegex);
+    if (rpMatch) {
+      try {
+        let packs: string[] = JSON.parse(rpMatch[1]);
+        if (Array.isArray(packs)) {
+          const filtered = packs.filter(
+            (p) => p !== targetPackName && p !== 'ZLauncherSkinPack' && p !== `${targetPackName}.zip`
+          );
+          content = content.replace(rpRegex, `resourcePacks:${JSON.stringify(filtered)}`);
+        }
+      } catch (e) {}
+    }
+
+    const irpRegex = /^incompatibleResourcePacks:(.*)$/m;
+    const irpMatch = content.match(irpRegex);
+    if (irpMatch) {
+      try {
+        let irPacks: string[] = JSON.parse(irpMatch[1]);
+        if (Array.isArray(irPacks)) {
+          const filtered = irPacks.filter(
+            (p) => p !== targetPackName && p !== 'ZLauncherSkinPack' && p !== `${targetPackName}.zip`
+          );
+          content = content.replace(irpRegex, `incompatibleResourcePacks:${JSON.stringify(filtered)}`);
+        }
+      } catch (e) {}
+    }
+
+    fs.writeFileSync(optionsPath, content, 'utf8');
+  } catch (err) {
+    console.warn('[ZLauncher Skin] disableSkinPackInOptions warning:', err);
+  }
+}
+
+export async function ensureCustomSkinLoaderMod(
+  instanceDir: string,
+  rootGameDir: string,
+  httpPort: number = 28734
+): Promise<boolean> {
+  try {
+    const cacheDir = path.join(rootGameDir, 'cache', 'mods');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const cachedJarPath = path.join(cacheDir, CSL_UNIVERSAL_JAR);
+
+    // Download to cache if not present or empty
+    if (!fs.existsSync(cachedJarPath) || fs.statSync(cachedJarPath).size < 100000) {
+      let downloaded = false;
+      for (const url of CSL_DOWNLOAD_URLS) {
+        try {
+          console.log(`[ZLauncher Skin] Downloading CustomSkinLoader Universal from ${url}...`);
+          const res = await fetch(url, { headers: { 'User-Agent': 'ZLauncher/1.0.0' } });
+          if (res.ok) {
+            const arr = await res.arrayBuffer();
+            fs.writeFileSync(cachedJarPath, Buffer.from(arr));
+            downloaded = true;
+            console.log(`[ZLauncher Skin] CustomSkinLoader cached successfully (${arr.byteLength} bytes)`);
+            break;
+          }
+        } catch (downloadErr) {
+          console.warn(`[ZLauncher Skin] Download error from ${url}:`, downloadErr);
+        }
+      }
+      if (!downloaded && !fs.existsSync(cachedJarPath)) {
+        console.warn('[ZLauncher Skin] Could not download CustomSkinLoader Universal');
+        return false;
+      }
+    }
+
+    // Copy to instance mods directory
+    const modsDir = path.join(instanceDir, 'mods');
+    fs.mkdirSync(modsDir, { recursive: true });
+    const targetModPath = path.join(modsDir, CSL_UNIVERSAL_JAR);
+    if (!fs.existsSync(targetModPath) || fs.statSync(targetModPath).size !== fs.statSync(cachedJarPath).size) {
+      fs.copyFileSync(cachedJarPath, targetModPath);
+      console.log(`[ZLauncher Skin] Installed CustomSkinLoader Universal to ${targetModPath}`);
+    }
+
+    // Configure CustomSkinLoader.json with multi-source loadlist
+    const cslConfig = {
+      enable: true,
+      loadlist: [
+        {
+          name: 'LocalSkin',
+          type: 'Legacy',
+          checkPNG: false,
+          model: 'auto',
+          skin: 'CustomSkinLoader/LocalSkin/skins/{USERNAME}.png',
+          cape: 'CustomSkinLoader/LocalSkin/capes/{USERNAME}.png',
+          elytra: 'CustomSkinLoader/LocalSkin/elytras/{USERNAME}.png',
+        },
+        {
+          name: 'ZLauncherSkinService',
+          type: 'Legacy',
+          checkPNG: false,
+          model: 'auto',
+          skin: `http://127.0.0.1:${httpPort}/skin/{USERNAME}.png`,
+        },
+        {
+          name: 'ElyBy',
+          type: 'ElyByAPI',
+        },
+        {
+          name: 'Mojang',
+          type: 'MojangAPI',
+        },
+        {
+          name: 'TLauncher',
+          type: 'Legacy',
+          checkPNG: false,
+          model: 'auto',
+          skin: 'https://auth.tlauncher.org/skin/profile/texture/login/{USERNAME}',
+        },
+        {
+          name: 'Minotar',
+          type: 'Legacy',
+          checkPNG: false,
+          model: 'auto',
+          skin: 'https://minotar.net/skin/{USERNAME}',
+        },
+      ],
+    };
+
+    const targetDirs = [instanceDir];
+    if (rootGameDir && rootGameDir !== instanceDir) {
+      targetDirs.push(rootGameDir);
+    }
+
+    for (const dir of targetDirs) {
+      const cslDir = path.join(dir, 'CustomSkinLoader');
+      fs.mkdirSync(cslDir, { recursive: true });
+      fs.writeFileSync(path.join(cslDir, 'CustomSkinLoader.json'), JSON.stringify(cslConfig, null, 2), 'utf8');
+      // Ensure SkinPack override is disabled to avoid cloned player models!
+      disableSkinPackInOptions(dir);
+    }
+
+    return true;
+  } catch (e) {
+    console.error('[ZLauncher Skin] ensureCustomSkinLoaderMod error:', e);
+    return false;
+  }
+}
+
 export async function installOfflineSkin(options: SkinInstallOptions): Promise<boolean> {
   try {
     const skinBuffer = await resolveSkinBuffer(options.skinUrl);
@@ -158,97 +310,92 @@ export async function installOfflineSkin(options: SkinInstallOptions): Promise<b
       return false;
     }
 
+    const cleanUsername = (options.username || 'Player').trim();
+    const vId = options.versionId || '';
+    const isModded =
+      options.isModded !== false &&
+      (options.isModded === true ||
+        vId.includes('fabric') ||
+        vId.includes('forge') ||
+        vId.includes('quilt') ||
+        vId.includes('neoforge') ||
+        fs.existsSync(path.join(options.gameDir, 'mods')));
+
     const targetDirs = [options.gameDir];
     if (options.rootGameDir && options.rootGameDir !== options.gameDir) {
       targetDirs.push(options.rootGameDir);
     }
 
-    for (const dir of targetDirs) {
-      const rpDir = path.join(dir, 'resourcepacks', 'ZLauncherSkinPack');
-      fs.mkdirSync(rpDir, { recursive: true });
-
-      // 1. Write pack.mcmeta
-      const packFormat = getPackFormat(options.versionId);
-      const mcmeta = {
-        pack: {
-          pack_format: packFormat,
-          supported_formats: {
-            min_inclusive: 1,
-            max_inclusive: 999,
-          },
-          description: 'ZLauncher Offline Skin Support (Active)',
-        },
-      };
-      fs.writeFileSync(path.join(rpDir, 'pack.mcmeta'), JSON.stringify(mcmeta, null, 2), 'utf8');
-
-      // 2. Write pack.png (Use the skin itself as the pack icon!)
-      fs.writeFileSync(path.join(rpDir, 'pack.png'), skinBuffer);
-
-      // 3. Create all asset entity skin paths
-      const entityDir = path.join(rpDir, 'assets', 'minecraft', 'textures', 'entity');
-      const wideDir = path.join(entityDir, 'player', 'wide');
-      const slimDir = path.join(entityDir, 'player', 'slim');
-
-      fs.mkdirSync(entityDir, { recursive: true });
-      fs.mkdirSync(wideDir, { recursive: true });
-      fs.mkdirSync(slimDir, { recursive: true });
-
-      // Legacy Minecraft paths (1.6 to 1.12)
-      fs.writeFileSync(path.join(entityDir, 'steve.png'), skinBuffer);
-      fs.writeFileSync(path.join(entityDir, 'alex.png'), skinBuffer);
-
-      // Modern Minecraft 1.19.3+ default models
-      const defaultModelNames = [
-        'steve',
-        'alex',
-        'ari',
-        'chris',
-        'devan',
-        'efe',
-        'kai',
-        'makena',
-        'noor',
-        'sunny',
-        'zuri',
-      ];
-
-      for (const name of defaultModelNames) {
-        fs.writeFileSync(path.join(wideDir, `${name}.png`), skinBuffer);
-        fs.writeFileSync(path.join(slimDir, `${name}.png`), skinBuffer);
-      }
-
-      // 4. Create ZIP archive in resourcepacks folder as well
-      try {
-        const zip = new AdmZip();
-        zip.addLocalFolder(rpDir);
-        zip.writeZip(path.join(dir, 'resourcepacks', 'ZLauncherSkinPack.zip'));
-      } catch (zipErr) {
-        console.warn('[ZLauncher Skin] Zip packaging note:', zipErr);
-      }
-
-      // 5. Compatibility copies for Fabric/Forge skin mods (OfflineSkins / CustomSkinLoader)
-      if (options.username) {
-        const modSkinPaths = [
-          path.join(dir, 'config', 'offlineskins', `${options.username}.png`),
-          path.join(dir, 'cachedImages', 'skins', `${options.username}.png`),
-          path.join(dir, 'CustomSkinLoader', 'skins', `${options.username}.png`),
-        ];
-        for (const p of modSkinPaths) {
-          try {
-            fs.mkdirSync(path.dirname(p), { recursive: true });
-            fs.writeFileSync(p, skinBuffer);
-          } catch (e) {}
-        }
-      }
-
-      // 6. Automatically activate in options.txt
-      enableSkinPackInOptions(dir);
+    // 1. If modded instance: Install CustomSkinLoader Universal mod and write CSL config
+    if (isModded) {
+      await ensureCustomSkinLoaderMod(options.gameDir, options.rootGameDir || options.gameDir, options.httpPort || 28734);
     }
 
-    console.log(`[ZLauncher Skin] Skin successfully applied for singleplayer offline mode! User: ${options.username}`);
+    // 2. Write skin to all CustomSkinLoader local paths
+    for (const dir of targetDirs) {
+      const cslSkinsDir = path.join(dir, 'CustomSkinLoader', 'LocalSkin', 'skins');
+      const offlineskinsDir = path.join(dir, 'config', 'offlineskins');
+      const cachedImagesDir = path.join(dir, 'cachedImages', 'skins');
+
+      for (const d of [cslSkinsDir, offlineskinsDir, cachedImagesDir]) {
+        try {
+          fs.mkdirSync(d, { recursive: true });
+          fs.writeFileSync(path.join(d, `${cleanUsername}.png`), skinBuffer);
+          fs.writeFileSync(path.join(d, `${cleanUsername.toLowerCase()}.png`), skinBuffer);
+        } catch (e) {}
+      }
+    }
+
+    // 3. For pure vanilla fallback (when no modloader is available)
+    if (!isModded) {
+      for (const dir of targetDirs) {
+        const rpDir = path.join(dir, 'resourcepacks', 'ZLauncherSkinPack');
+        fs.mkdirSync(rpDir, { recursive: true });
+
+        const packFormat = getPackFormat(options.versionId);
+        const mcmeta = {
+          pack: {
+            pack_format: packFormat,
+            supported_formats: { min_inclusive: 1, max_inclusive: 999 },
+            description: 'ZLauncher Offline Skin Support (Active)',
+          },
+        };
+        fs.writeFileSync(path.join(rpDir, 'pack.mcmeta'), JSON.stringify(mcmeta, null, 2), 'utf8');
+        fs.writeFileSync(path.join(rpDir, 'pack.png'), skinBuffer);
+
+        const entityDir = path.join(rpDir, 'assets', 'minecraft', 'textures', 'entity');
+        const wideDir = path.join(entityDir, 'player', 'wide');
+        const slimDir = path.join(entityDir, 'player', 'slim');
+
+        fs.mkdirSync(entityDir, { recursive: true });
+        fs.mkdirSync(wideDir, { recursive: true });
+        fs.mkdirSync(slimDir, { recursive: true });
+
+        fs.writeFileSync(path.join(entityDir, 'steve.png'), skinBuffer);
+        fs.writeFileSync(path.join(entityDir, 'alex.png'), skinBuffer);
+
+        const defaultModelNames = [
+          'steve', 'alex', 'ari', 'chris', 'devan', 'efe', 'kai', 'makena', 'noor', 'sunny', 'zuri',
+        ];
+        for (const name of defaultModelNames) {
+          fs.writeFileSync(path.join(wideDir, `${name}.png`), skinBuffer);
+          fs.writeFileSync(path.join(slimDir, `${name}.png`), skinBuffer);
+        }
+
+        try {
+          const zip = new AdmZip();
+          zip.addLocalFolder(rpDir);
+          zip.writeZip(path.join(dir, 'resourcepacks', 'ZLauncherSkinPack.zip'));
+        } catch (zipErr) {}
+
+        enableSkinPackInOptions(dir);
+      }
+    }
+
+    console.log(`[ZLauncher Skin] Skin ready for ${cleanUsername} (isModded=${isModded})`);
     return true;
   } catch (err) {
-    console.error('[ZLauncher Skin] Error installing offline skin:', err);
+    console.error('[ZLauncher Skin] Error installing skin:', err);
     return false;
   }
 }

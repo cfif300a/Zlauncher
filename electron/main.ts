@@ -4,12 +4,14 @@ import fs from 'fs';
 import os from 'os';
 import { execSync } from 'child_process';
 import { MinecraftLauncher, getDefaultGameDir, LaunchConfig } from './launcher';
-import { installOfflineSkin } from './skins';
+import { installOfflineSkin, resolveSkinBuffer } from './skins';
+import { SkinSyncService } from './skinSync';
 import { detectInstalledJavas, downloadJavaRuntime } from './javaManager';
 import { installMrpack } from './mrpackManager';
 
 let mainWindow: BrowserWindow | null = null;
 const launcher = new MinecraftLauncher();
+let skinSyncService: SkinSyncService | null = null;
 
 const userDataDir = path.join(process.env.APPDATA || (process.platform === 'darwin' ? path.join(process.env.HOME || '', 'Library', 'Application Support') : path.join(process.env.HOME || '', '.config')), 'ZLauncherData');
 app.setPath('userData', userDataDir);
@@ -264,8 +266,22 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   createWindow();
+
+  try {
+    const cfg = loadConfig();
+    const baseDir = cfg.gameDir || getDefaultGameDir();
+    const skinBuffer = await resolveSkinBuffer(cfg.skinUrl);
+    skinSyncService = new SkinSyncService({
+      baseDir,
+      initialUsername: cfg.username || 'Player',
+      initialSkinBuffer: skinBuffer,
+    });
+    await skinSyncService.start();
+  } catch (err) {
+    console.warn('[SkinSync Init Warning]', err);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -275,6 +291,9 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  if (skinSyncService) {
+    skinSyncService.stop();
+  }
   if (process.platform !== 'darwin') {
     app.quit();
   }
@@ -320,22 +339,34 @@ ipcMain.handle('save-config', async (_event, cfg) => {
   };
   const saved = saveConfig(updated);
 
-  // If a skin URL was updated, pre-generate the offline skin pack immediately
-  if (cfg.skinUrl) {
+  // If a skin URL or username was updated, pre-generate skin assets immediately
+  if (cfg.skinUrl || cfg.username) {
     try {
       const activeInst = (updated.instances || []).find((i: any) => i.id === updated.activeInstanceId);
       const instDir = activeInst && activeInst.id !== 'default'
         ? path.join(baseDir, 'instances', activeInst.id)
         : baseDir;
 
-      installOfflineSkin({
-        gameDir: instDir,
-        rootGameDir: baseDir,
-        skinUrl: cfg.skinUrl,
-        skinType: cfg.skinType || updated.skinType || 'classic',
-        versionId: activeInst?.versionId || updated.selectedVersion || '26.3',
-        username: updated.username || 'Player',
-      }).catch((e) => console.warn('[Skin Save Note]', e));
+      const effectiveUser = (updated.username || 'Player').trim();
+      const effectiveSkinUrl = updated.skinUrl || cfg.skinUrl;
+
+      if (effectiveSkinUrl) {
+        installOfflineSkin({
+          gameDir: instDir,
+          rootGameDir: baseDir,
+          skinUrl: effectiveSkinUrl,
+          skinType: cfg.skinType || updated.skinType || 'classic',
+          versionId: activeInst?.versionId || updated.selectedVersion || '26.3',
+          username: effectiveUser,
+          httpPort: skinSyncService?.getHttpPort() || 28734,
+        }).catch((e) => console.warn('[Skin Save Note]', e));
+
+        if (skinSyncService) {
+          resolveSkinBuffer(effectiveSkinUrl).then((buf) => {
+            skinSyncService?.updateIdentity(effectiveUser, buf, baseDir);
+          }).catch(() => {});
+        }
+      }
     } catch (e) {}
   }
 
@@ -613,19 +644,25 @@ ipcMain.handle('launch-game', async (_event, options: LaunchConfig) => {
     }
   }
 
-  // Inject offline player skin for singleplayer
-  try {
-    const effectiveSkinUrl = (options as any).skinUrl || cfg.skinUrl;
-    const effectiveSkinType = (options as any).skinType || cfg.skinType || 'classic';
-    const effectiveVersion = activeInst?.versionId || options.versionId;
-    const effectiveUsername = options.username || cfg.username || 'Player';
+  // Inject player skin and Universal CustomSkinLoader
+  const effectiveUsername = (options.username || cfg.username || 'Player').trim();
+  const effectiveSkinUrl = (options as any).skinUrl || cfg.skinUrl;
+  const effectiveSkinType = (options as any).skinType || cfg.skinType || 'classic';
+  const effectiveVersion = activeInst?.versionId || options.versionId;
 
+  try {
     if (effectiveSkinUrl) {
       mainWindow?.webContents.send('console-log', {
         type: 'system',
-        text: `[ZLauncher] Подготовка скина "${effectiveUsername}" для одиночной игры...`,
+        text: `[ZLauncher] Подготовка скина "${effectiveUsername}" (Universal CustomSkinLoader)...`,
         timestamp: new Date().toLocaleTimeString(),
       });
+
+      if (skinSyncService) {
+        const skinBuf = await resolveSkinBuffer(effectiveSkinUrl);
+        skinSyncService.updateIdentity(effectiveUsername, skinBuf, baseDir);
+        skinSyncService.broadcastSkin();
+      }
 
       await installOfflineSkin({
         gameDir: instanceGameDir,
@@ -634,11 +671,12 @@ ipcMain.handle('launch-game', async (_event, options: LaunchConfig) => {
         skinType: effectiveSkinType,
         versionId: effectiveVersion,
         username: effectiveUsername,
+        httpPort: skinSyncService ? skinSyncService.getHttpPort() : 28734,
       });
 
       mainWindow?.webContents.send('console-log', {
         type: 'system',
-        text: `[ZLauncher] Скин игрока успешно внедрен в ZLauncherSkinPack и активирован в options.txt`,
+        text: `[ZLauncher] Скин игрока "${effectiveUsername}" готов. Мультиплеерные скины активны!`,
         timestamp: new Date().toLocaleTimeString(),
       });
     }
@@ -649,6 +687,7 @@ ipcMain.handle('launch-game', async (_event, options: LaunchConfig) => {
   const result = await launcher.prepareAndLaunch(
     {
       ...options,
+      username: effectiveUsername,
       versionId: activeInst?.versionId || options.versionId,
       javaPath: jPath,
       gameDir: instanceGameDir,
