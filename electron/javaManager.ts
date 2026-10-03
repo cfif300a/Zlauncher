@@ -41,10 +41,21 @@ export function parseJavaMajorVersion(output: string): number | null {
 /**
  * Inspects a Java executable to get its major version and formatted display string
  */
-export function getJavaInfo(execPath: string): { majorVersion: number; version: string } | null {
+export function getJavaInfo(execPath: string): { majorVersion: number; version: string; rawOutput: string } | null {
   try {
     if (!fs.existsSync(execPath)) return null;
-    const out = execSync(`"${execPath}" -version 2>&1`, { encoding: 'utf8', timeout: 4000 });
+
+    // On Windows, javaw.exe is GUI subsystem and does not pipe console stdout/stderr reliably.
+    // Use companion java.exe in the same folder if available to query version.
+    let testPath = execPath;
+    if (process.platform === 'win32' && /javaw(\.exe)?$/i.test(execPath)) {
+      const companion = execPath.replace(/javaw(\.exe)?$/i, 'java$1');
+      if (fs.existsSync(companion)) {
+        testPath = companion;
+      }
+    }
+
+    const out = execSync(`"${testPath}" -version 2>&1`, { encoding: 'utf8', timeout: 5000 });
     const major = parseJavaMajorVersion(out);
     if (!major) return null;
 
@@ -56,6 +67,7 @@ export function getJavaInfo(execPath: string): { majorVersion: number; version: 
     return {
       majorVersion: major,
       version: `Java ${verStr}`,
+      rawOutput: out.trim(),
     };
   } catch (e) {
     return null;
@@ -63,9 +75,9 @@ export function getJavaInfo(execPath: string): { majorVersion: number; version: 
 }
 
 /**
- * Searches a folder for a Java executable (`javaw.exe`, `java.exe` or `java`)
+ * Searches a folder recursively for Java executables (`javaw.exe`, `java.exe` or `java`)
  */
-export function findJavaExecutableInDir(dir: string): string | null {
+export function findJavaExecutableInDir(dir: string, maxDepth: number = 4): string | null {
   if (!fs.existsSync(dir)) return null;
 
   const isWin = process.platform === 'win32';
@@ -83,28 +95,84 @@ export function findJavaExecutableInDir(dir: string): string | null {
     }
   }
 
-  // Check subdirectories (e.g. dir/jdk-25.0.4+1/bin/javaw.exe or zulu-25/bin/...)
+  // Also check if dir itself contains executables directly
+  if (isWin) {
+    const directJavaw = path.join(dir, 'javaw.exe');
+    if (fs.existsSync(directJavaw)) return directJavaw;
+    const directJava = path.join(dir, 'java.exe');
+    if (fs.existsSync(directJava)) return directJava;
+  } else {
+    const directJava = path.join(dir, 'java');
+    if (fs.existsSync(directJava)) return directJava;
+  }
+
+  if (maxDepth <= 0) return null;
+
   try {
     const subs = fs.readdirSync(dir, { withFileTypes: true });
     for (const sub of subs) {
       if (sub.isDirectory()) {
-        const subBin = path.join(dir, sub.name, 'bin');
-        if (fs.existsSync(subBin)) {
-          if (isWin) {
-            const javaw = path.join(subBin, 'javaw.exe');
-            if (fs.existsSync(javaw)) return javaw;
-            const java = path.join(subBin, 'java.exe');
-            if (fs.existsSync(java)) return java;
-          } else {
-            const java = path.join(subBin, 'java');
-            if (fs.existsSync(java)) return java;
-          }
-        }
+        const fullSub = path.join(dir, sub.name);
+        const found = findJavaExecutableInDir(fullSub, maxDepth - 1);
+        if (found) return found;
       }
     }
   } catch (e) {}
 
   return null;
+}
+
+/**
+ * Collects all Java executables found in a directory tree up to maxDepth
+ */
+export function findAllJavaExecutablesInDir(dir: string, maxDepth: number = 4): string[] {
+  const results: string[] = [];
+  if (!fs.existsSync(dir)) return results;
+
+  const isWin = process.platform === 'win32';
+  const binDir = path.join(dir, 'bin');
+
+  if (fs.existsSync(binDir)) {
+    if (isWin) {
+      const javaw = path.join(binDir, 'javaw.exe');
+      if (fs.existsSync(javaw)) results.push(javaw);
+      else {
+        const java = path.join(binDir, 'java.exe');
+        if (fs.existsSync(java)) results.push(java);
+      }
+    } else {
+      const java = path.join(binDir, 'java');
+      if (fs.existsSync(java)) results.push(java);
+    }
+  }
+
+  if (maxDepth <= 0) return results;
+
+  try {
+    const subs = fs.readdirSync(dir, { withFileTypes: true });
+    for (const sub of subs) {
+      if (sub.isDirectory()) {
+        const fullSub = path.join(dir, sub.name);
+        results.push(...findAllJavaExecutablesInDir(fullSub, maxDepth - 1));
+      }
+    }
+  } catch (e) {}
+
+  return results;
+}
+
+/**
+ * Checks if a path is the Oracle javapath symlink (which dynamically redirects to whatever JDK was installed last)
+ */
+export function isOracleJavapath(filePath: string): boolean {
+  if (!filePath) return false;
+  const lower = filePath.toLowerCase().replace(/\\/g, '/');
+  return (
+    lower.includes('/oracle/java/javapath') ||
+    lower.includes('common files/oracle/java/javapath') ||
+    lower.endsWith('/javapath') ||
+    lower.includes('/javapath/')
+  );
 }
 
 /**
@@ -116,12 +184,20 @@ export function detectInstalledJavas(rootGameDir?: string): JavaInstallation[] {
 
   const checkAndAdd = (execPath: string, isDef: boolean = false, isInt: boolean = false) => {
     if (!execPath) return;
+    if (isOracleJavapath(execPath)) {
+      console.log(`[ZLauncher Java] Ignoring Oracle javapath symlink: ${execPath}`);
+      return;
+    }
+
     const normalized = path.normalize(execPath).toLowerCase();
     if (checkedPaths.has(normalized)) return;
     checkedPaths.add(normalized);
 
     const info = getJavaInfo(execPath);
     if (info) {
+      console.log(
+        `[ZLauncher Java] Detected ${info.version} (major: ${info.majorVersion}) at: ${execPath}`
+      );
       javaList.push({
         path: execPath,
         version: info.version,
@@ -136,30 +212,27 @@ export function detectInstalledJavas(rootGameDir?: string): JavaInstallation[] {
   if (rootGameDir) {
     const runtimesDir = path.join(rootGameDir, 'runtimes');
     if (fs.existsSync(runtimesDir)) {
-      try {
-        const items = fs.readdirSync(runtimesDir, { withFileTypes: true });
-        for (const item of items) {
-          if (item.isDirectory()) {
-            const fullDir = path.join(runtimesDir, item.name);
-            const exe = findJavaExecutableInDir(fullDir);
-            if (exe) checkAndAdd(exe, false, true);
-          }
-        }
-      } catch (e) {}
+      const found = findAllJavaExecutablesInDir(runtimesDir, 4);
+      for (const exe of found) {
+        checkAndAdd(exe, false, true);
+      }
     }
   }
 
-  // 2. Check system PATH 'java' / 'javaw'
+  // 2. Check system PATH 'java' / 'javaw' (filtering out javapath symlinks)
   try {
     const cmd = process.platform === 'win32' ? 'where javaw 2>nul || where java' : 'which java';
-    const whichJava = execSync(cmd, { encoding: 'utf8', timeout: 3000 }).trim().split(/\r?\n/)[0];
-    if (whichJava) {
-      checkAndAdd(whichJava, true, false);
+    const output = execSync(cmd, { encoding: 'utf8', timeout: 3000 }).trim();
+    const lines = output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    for (const candidate of lines) {
+      if (!isOracleJavapath(candidate)) {
+        checkAndAdd(candidate, true, false);
+      }
     }
   } catch (e) {}
 
   // 3. Check JAVA_HOME
-  if (process.env.JAVA_HOME) {
+  if (process.env.JAVA_HOME && !isOracleJavapath(process.env.JAVA_HOME)) {
     const isWin = process.platform === 'win32';
     const homeJavaw = path.join(process.env.JAVA_HOME, 'bin', isWin ? 'javaw.exe' : 'java');
     const homeJava = path.join(process.env.JAVA_HOME, 'bin', isWin ? 'java.exe' : 'java');
@@ -176,37 +249,27 @@ export function detectInstalledJavas(rootGameDir?: string): JavaInstallation[] {
       'C:\\Program Files\\BellSoft',
       'C:\\Program Files\\Microsoft',
       'C:\\Program Files\\Zulu',
+      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Eclipse Adoptium'),
+      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Java'),
     ];
 
     for (const sDir of searchDirs) {
-      if (fs.existsSync(sDir)) {
-        try {
-          const subs = fs.readdirSync(sDir, { withFileTypes: true });
-          for (const sub of subs) {
-            if (sub.isDirectory()) {
-              const fullSub = path.join(sDir, sub.name);
-              const exe = findJavaExecutableInDir(fullSub);
-              if (exe) checkAndAdd(exe);
-            }
-          }
-        } catch (e) {}
+      if (sDir && fs.existsSync(sDir)) {
+        const found = findAllJavaExecutablesInDir(sDir, 4);
+        for (const exe of found) {
+          checkAndAdd(exe);
+        }
       }
     }
 
-    // Check Mojang Minecraft launcher runtime folder if present
+    // Check Mojang Minecraft launcher runtime folder (%APPDATA%\.minecraft\runtime)
     if (process.env.APPDATA) {
       const mojangRuntime = path.join(process.env.APPDATA, '.minecraft', 'runtime');
       if (fs.existsSync(mojangRuntime)) {
-        try {
-          const subs = fs.readdirSync(mojangRuntime, { withFileTypes: true });
-          for (const sub of subs) {
-            if (sub.isDirectory()) {
-              const fullSub = path.join(mojangRuntime, sub.name);
-              const exe = findJavaExecutableInDir(fullSub);
-              if (exe) checkAndAdd(exe);
-            }
-          }
-        } catch (e) {}
+        const found = findAllJavaExecutablesInDir(mojangRuntime, 4);
+        for (const exe of found) {
+          checkAndAdd(exe);
+        }
       }
     }
   }
@@ -463,15 +526,19 @@ export async function ensureJavaRuntime(
   preferredJavaPath?: string,
   onProgress?: (status: string, percent: number) => void
 ): Promise<string> {
-  // Step 1: Check user-specified preferred path
+  console.log(`[ZLauncher Java] Ensuring Java runtime for required major version: ${requiredMajor}`);
+
+  // Step 1: Check user-specified preferred path (ignore if Oracle javapath symlink)
   if (preferredJavaPath && preferredJavaPath.trim() !== '') {
     const trimmed = preferredJavaPath.trim();
-    if (fs.existsSync(trimmed)) {
+    if (!isOracleJavapath(trimmed) && fs.existsSync(trimmed)) {
       const info = getJavaInfo(trimmed);
       if (info) {
-        if (requiredMajor === 8 && info.majorVersion === 8) {
+        if (info.majorVersion === requiredMajor) {
+          console.log(`[ZLauncher Java] Using user-preferred Java (${info.version}): ${trimmed}`);
           return trimmed;
-        } else if (requiredMajor > 8 && info.majorVersion >= requiredMajor) {
+        } else if (requiredMajor > 8 && requiredMajor !== 25 && info.majorVersion >= requiredMajor) {
+          console.log(`[ZLauncher Java] Using compatible user-preferred Java (${info.version}): ${trimmed}`);
           return trimmed;
         } else {
           onProgress?.(
@@ -489,6 +556,7 @@ export async function ensureJavaRuntime(
   if (internalExe) {
     const info = getJavaInfo(internalExe);
     if (info && info.majorVersion === requiredMajor) {
+      console.log(`[ZLauncher Java] Using internal Java ${requiredMajor}: ${internalExe}`);
       return internalExe;
     }
   }
@@ -496,18 +564,25 @@ export async function ensureJavaRuntime(
   // Step 3: Check system installed Javas
   const allJavas = detectInstalledJavas(rootGameDir);
 
-  // Exact match
+  // Exact match (prioritizing true Java 25 installations e.g. java-runtime-epsilon)
   const exactMatch = allJavas.find((j) => j.majorVersion === requiredMajor);
   if (exactMatch) {
+    console.log(
+      `[ZLauncher Java] Selected exact matching Java ${requiredMajor}: ${exactMatch.path} (${exactMatch.version})`
+    );
     return exactMatch.path;
   }
 
-  // Compatible match for modern Java (e.g. Java 25 can run Java 21/17 games)
-  if (requiredMajor > 8) {
+  // For Java 25: Minecraft 26.x requires Java 25. NEVER use Java 26 as fallback!
+  if (requiredMajor === 25) {
+    console.log('[ZLauncher Java] Exact Java 25 not detected in system. Will auto-download portable Java 25.');
+  } else if (requiredMajor > 8) {
+    // Compatible match for other versions (e.g. Java 21 can run Java 17 games)
     const compatible = allJavas
-      .filter((j) => j.majorVersion >= requiredMajor)
+      .filter((j) => j.majorVersion >= requiredMajor && j.majorVersion !== 26)
       .sort((a, b) => a.majorVersion - b.majorVersion)[0];
     if (compatible) {
+      console.log(`[ZLauncher Java] Selected compatible Java ${compatible.majorVersion}: ${compatible.path}`);
       return compatible.path;
     }
   }

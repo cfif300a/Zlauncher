@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, execSync, ChildProcess } from 'child_process';
 import AdmZip from 'adm-zip';
 import { FastDownloader, DownloadTask } from './downloader';
 import { getRequiredJavaMajor, ensureJavaRuntime } from './javaManager';
@@ -864,6 +864,7 @@ export class MinecraftLauncher {
         `-Dminecraft.launcher.brand=ZLauncher`,
         `-Dminecraft.launcher.version=1.0.0`,
         `-Dfile.encoding=UTF-8`,
+        `-Dcustomskinloader.ignorePatchFailure=true`,
       ];
 
       // JVM Performance optimizations
@@ -1027,6 +1028,27 @@ export class MinecraftLauncher {
 
       // 5. Spawn Java process in instance directory
       onProgress({ status: 'Запуск Minecraft...', progress: 100 });
+
+      // Query and log the exact version reported by the selected Java executable
+      try {
+        let testExe = resolvedJavaPath;
+        if (process.platform === 'win32' && /javaw(\.exe)?$/i.test(resolvedJavaPath)) {
+          const companion = resolvedJavaPath.replace(/javaw(\.exe)?$/i, 'java$1');
+          if (fs.existsSync(companion)) {
+            testExe = companion;
+          }
+        }
+        const javaVersionOutput = execSync(`"${testExe}" -version 2>&1`, { encoding: 'utf8', timeout: 5000 }).trim();
+        console.log(`[ZLauncher] java -version:\n${javaVersionOutput}`);
+        onLog({
+          type: 'system',
+          text: `[ZLauncher] java -version:\n${javaVersionOutput}\n`,
+          timestamp: new Date().toLocaleTimeString(),
+        });
+      } catch (verErr: any) {
+        console.warn('[ZLauncher] Could not query java -version:', verErr);
+      }
+
       console.log('[ZLauncher] Java args:', launchCommandArgs.join(' '));
       console.log('[ZLauncher] Java command:', resolvedJavaPath, launchCommandArgs.join(' '));
       onLog({
