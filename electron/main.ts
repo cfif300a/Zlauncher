@@ -813,10 +813,19 @@ ipcMain.handle('search-modrinth', async (_event, query: string, options: any) =>
     if (options?.projectType) {
       facets.push([`project_type:${options.projectType}`]);
     }
-    if (options?.loader && options.loader !== 'all' && options.loader !== 'vanilla') {
+
+    // Mod loader category ONLY applies to mods (never shaders or resource packs!)
+    if (
+      (!options?.projectType || options.projectType === 'mod') &&
+      options?.loader &&
+      options.loader !== 'all' &&
+      options.loader !== 'vanilla'
+    ) {
       facets.push([`categories:${options.loader}`]);
     }
-    if (options?.version) {
+
+    // Version filter (optional for shaders and resourcepacks)
+    if (options?.version && options.version !== 'all') {
       facets.push([`versions:${options.version}`]);
     }
 
@@ -855,11 +864,14 @@ async function downloadModWithDependencies(
   visitedProjects: Set<string> = new Set()
 ): Promise<string[]> {
   const downloadedFiles: string[] = [];
-  const projectId = versionData.project_id || versionData.id;
+  const projKey = versionData.project_id || versionData.id;
 
-  if (projectId) {
-    if (visitedProjects.has(projectId)) return downloadedFiles;
-    visitedProjects.add(projectId);
+  if (projKey) {
+    if (visitedProjects.has(projKey)) {
+      console.log(`[Modrinth] Проект ${projKey} уже загружен или обрабатывается`);
+      return downloadedFiles;
+    }
+    visitedProjects.add(projKey);
   }
   if (versionData.id) {
     visitedProjects.add(versionData.id);
@@ -870,17 +882,22 @@ async function downloadModWithDependencies(
   if (file && file.url) {
     fs.mkdirSync(targetDir, { recursive: true });
     const destPath = path.join(targetDir, file.filename);
-    console.log(`[Modrinth] Скачивание ${file.filename} в ${destPath}...`);
-    const fileRes = await fetch(file.url, {
-      headers: { 'User-Agent': 'ZLauncher/1.0.0 (contact@zlauncher.local)' },
-    });
-    if (fileRes.ok) {
-      const buf = Buffer.from(await fileRes.arrayBuffer());
-      fs.writeFileSync(destPath, buf);
-      downloadedFiles.push(file.filename);
-      console.log(`[Modrinth] Успешно скачан: ${file.filename} (${buf.length} байт)`);
+    if (!fs.existsSync(destPath)) {
+      console.log(`[Modrinth] Скачивание ${file.filename} в ${destPath}...`);
+      const fileRes = await fetch(file.url, {
+        headers: { 'User-Agent': 'ZLauncher/1.0.0 (contact@zlauncher.local)' },
+      });
+      if (fileRes.ok) {
+        const buf = Buffer.from(await fileRes.arrayBuffer());
+        fs.writeFileSync(destPath, buf);
+        downloadedFiles.push(file.filename);
+        console.log(`[Modrinth] Успешно скачан: ${file.filename} (${buf.length} байт)`);
+      } else {
+        throw new Error(`Ошибка загрузки ${file.filename}: HTTP ${fileRes.status}`);
+      }
     } else {
-      throw new Error(`Ошибка загрузки ${file.filename}: HTTP ${fileRes.status}`);
+      console.log(`[Modrinth] Файл уже присутствует на диске: ${file.filename}`);
+      downloadedFiles.push(file.filename);
     }
   } else {
     throw new Error('У выбранной версии отсутствует файл для загрузки');
@@ -892,22 +909,20 @@ async function downloadModWithDependencies(
       if (dep.dependency_type === 'required') {
         const depProjId = dep.project_id;
         const depVerId = dep.version_id;
+
+        // Skip if already visited
         if (depProjId && visitedProjects.has(depProjId)) continue;
         if (depVerId && visitedProjects.has(depVerId)) continue;
 
         try {
           // If explicit version ID is specified for the dependency
           if (depVerId) {
-            visitedProjects.add(depVerId);
             const vRes = await fetch(
               `https://api.modrinth.com/v2/version/${encodeURIComponent(depVerId)}`,
               { headers: { 'User-Agent': 'ZLauncher/1.0.0 (contact@zlauncher.local)' } }
             );
             if (vRes.ok) {
               const depVersionData = (await vRes.json()) as any;
-              if (depVersionData && depVersionData.project_id) {
-                visitedProjects.add(depVersionData.project_id);
-              }
               const subDownloaded = await downloadModWithDependencies(
                 depVersionData,
                 targetDir,
@@ -922,60 +937,61 @@ async function downloadModWithDependencies(
 
           // If project ID is specified, find matching version
           if (depProjId) {
-            visitedProjects.add(depProjId);
-            const pRes = await fetch(
-              `https://api.modrinth.com/v2/project/${encodeURIComponent(depProjId)}/version`,
-              { headers: { 'User-Agent': 'ZLauncher/1.0.0 (contact@zlauncher.local)' } }
-            );
-            if (pRes.ok) {
-              const pVersions = (await pRes.json()) as any[];
-              if (Array.isArray(pVersions) && pVersions.length > 0) {
-                // Exact match: game version + loader
-                let matchedVer = pVersions.find(
-                  (v: any) =>
-                    Array.isArray(v.game_versions) &&
-                    v.game_versions.includes(targetGameVersion) &&
-                    Array.isArray(v.loaders) &&
-                    v.loaders.map((l: string) => l.toLowerCase()).includes(targetLoader)
-                );
+            let matchedVer: any = null;
 
-                // Minor version match + loader
-                if (!matchedVer) {
-                  const majorMinor = targetGameVersion.split('.').slice(0, 2).join('.');
-                  matchedVer = pVersions.find(
-                    (v: any) =>
-                      Array.isArray(v.game_versions) &&
-                      v.game_versions.some((gv: string) => gv.startsWith(majorMinor)) &&
-                      Array.isArray(v.loaders) &&
-                      v.loaders.map((l: string) => l.toLowerCase()).includes(targetLoader)
-                  );
-                }
-
-                // Loader match
-                if (!matchedVer && targetLoader && targetLoader !== 'vanilla' && targetLoader !== 'all') {
-                  matchedVer = pVersions.find(
-                    (v: any) =>
-                      Array.isArray(v.loaders) &&
-                      v.loaders.map((l: string) => l.toLowerCase()).includes(targetLoader)
-                  );
-                }
-
-                // Fallback to release
-                if (!matchedVer) {
-                  matchedVer = pVersions.find((v: any) => v.version_type === 'release') || pVersions[0];
-                }
-
-                if (matchedVer) {
-                  const subDownloaded = await downloadModWithDependencies(
-                    matchedVer,
-                    targetDir,
-                    targetGameVersion,
-                    targetLoader,
-                    visitedProjects
-                  );
-                  downloadedFiles.push(...subDownloaded);
+            // Step A: Targeted query with loaders & game_versions
+            try {
+              const filterUrl = `https://api.modrinth.com/v2/project/${encodeURIComponent(depProjId)}/version?loaders=${encodeURIComponent(JSON.stringify([targetLoader]))}&game_versions=${encodeURIComponent(JSON.stringify([targetGameVersion]))}`;
+              const pRes = await fetch(filterUrl, {
+                headers: { 'User-Agent': 'ZLauncher/1.0.0 (contact@zlauncher.local)' },
+              });
+              if (pRes.ok) {
+                const list = (await pRes.json()) as any[];
+                if (Array.isArray(list) && list.length > 0) {
+                  matchedVer = list[0];
                 }
               }
+            } catch (e) {}
+
+            // Step B: Fallback - fetch all versions and match
+            if (!matchedVer) {
+              const allRes = await fetch(
+                `https://api.modrinth.com/v2/project/${encodeURIComponent(depProjId)}/version`,
+                { headers: { 'User-Agent': 'ZLauncher/1.0.0 (contact@zlauncher.local)' } }
+              );
+              if (allRes.ok) {
+                const allList = (await allRes.json()) as any[];
+                if (Array.isArray(allList) && allList.length > 0) {
+                  // Minor version match + loader
+                  const majorMinor = targetGameVersion.split('.').slice(0, 2).join('.');
+                  matchedVer =
+                    allList.find(
+                      (v: any) =>
+                        Array.isArray(v.game_versions) &&
+                        v.game_versions.some((gv: string) => gv.startsWith(majorMinor)) &&
+                        Array.isArray(v.loaders) &&
+                        v.loaders.map((l: string) => l.toLowerCase()).includes(targetLoader)
+                    ) ||
+                    allList.find(
+                      (v: any) =>
+                        Array.isArray(v.loaders) &&
+                        v.loaders.map((l: string) => l.toLowerCase()).includes(targetLoader)
+                    ) ||
+                    allList.find((v: any) => v.version_type === 'release') ||
+                    allList[0];
+                }
+              }
+            }
+
+            if (matchedVer) {
+              const subDownloaded = await downloadModWithDependencies(
+                matchedVer,
+                targetDir,
+                targetGameVersion,
+                targetLoader,
+                visitedProjects
+              );
+              downloadedFiles.push(...subDownloaded);
             }
           }
         } catch (depErr) {
