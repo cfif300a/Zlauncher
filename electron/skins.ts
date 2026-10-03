@@ -198,16 +198,61 @@ export function patchCustomSkinLoaderJar(jarPath: string): boolean {
   if (!fs.existsSync(jarPath)) return false;
   try {
     const zip = new AdmZip(jarPath);
-    const entry = zip.getEntry('customskinloader/mapping.xml');
-    if (!entry) return false;
-    let xml = entry.getData().toString('utf8');
-    if (!xml.includes(',800]') && (xml.includes(',774]') || xml.includes('773,774') || xml.includes('774,['))) {
-      xml = xml.replace(/,774\]/g, ',800]');
-      xml = xml.replace(/773,774/g, '773,774,775,776,777,778,779,780');
-      xml = xml.replace(/774,\[/g, '774,775,776,777,778,779,780,[');
-      zip.updateFile('customskinloader/mapping.xml', Buffer.from(xml, 'utf8'));
+    let modified = false;
+
+    // 1. Mapping XML protocol support for 777+
+    const mappingEntry = zip.getEntry('customskinloader/mapping.xml');
+    if (mappingEntry) {
+      let xml = mappingEntry.getData().toString('utf8');
+      if (!xml.includes(',800]') && (xml.includes(',774]') || xml.includes('773,774') || xml.includes('774,['))) {
+        xml = xml.replace(/,774\]/g, ',800]');
+        xml = xml.replace(/773,774/g, '773,774,775,776,777,778,779,780');
+        xml = xml.replace(/774,\[/g, '774,775,776,777,778,779,780,[');
+        zip.updateFile('customskinloader/mapping.xml', Buffer.from(xml, 'utf8'));
+        modified = true;
+      }
+    }
+
+    // 2. TransformerBootstrap: safely return if target ClassInfo is null (don't throw IllegalStateException on unmapped/missing classes like class_3298)
+    const tbEntry = zip.getEntry('customskinloader/bootstrap/fabric/v1/TransformerBootstrap.class');
+    if (tbEntry) {
+      const tbBuf = Buffer.from(tbEntry.getData());
+      const tbTarget = Buffer.from([
+        0x19, 0x07, 0xc7, 0x00, 0x20, 0xbb, 0x00, 0x80, 0x59, 0xbb, 0x00, 0x3e, 0x59, 0xb7, 0x00, 0x40,
+        0x13, 0x01, 0x1f, 0xb6, 0x00, 0x43, 0x19, 0x05, 0xb6, 0x00, 0x43, 0xb6, 0x00, 0x4c, 0xb7, 0x01,
+        0x0a, 0xbf,
+      ]);
+      const tbIdx = tbBuf.indexOf(tbTarget);
+      if (tbIdx !== -1) {
+        tbBuf[tbIdx + 5] = 0xb1; // return
+        for (let i = 6; i < 34; i++) {
+          tbBuf[tbIdx + i] = 0x00; // nop
+        }
+        zip.updateFile('customskinloader/bootstrap/fabric/v1/TransformerBootstrap.class', tbBuf);
+        modified = true;
+      }
+    }
+
+    // 3. SkinManagerPatch: allow SessionService in addition to MinecraftSessionService for unpackTextures
+    const smpEntry = zip.getEntry('customskinloader/bootstrap/transformer/patch/SkinManagerPatch.class');
+    if (smpEntry) {
+      const smpBuf = Buffer.from(smpEntry.getData());
+      const smpTarget = Buffer.from([
+        0x13, 0x01, 0xed, 0x19, 0x0a, 0xb4, 0x01, 0x5f, 0xb6, 0x01, 0x63, 0x99, 0x00, 0x9a,
+      ]);
+      const smpIdx = smpBuf.indexOf(smpTarget);
+      if (smpIdx !== -1) {
+        for (let i = 0; i < smpTarget.length; i++) {
+          smpBuf[smpIdx + i] = 0x00; // nop
+        }
+        zip.updateFile('customskinloader/bootstrap/transformer/patch/SkinManagerPatch.class', smpBuf);
+        modified = true;
+      }
+    }
+
+    if (modified) {
       zip.writeZip(jarPath);
-      console.log(`[ZLauncher Skin] Patched CustomSkinLoader mapping.xml in ${jarPath} for protocol 777+`);
+      console.log(`[ZLauncher Skin] Patched CustomSkinLoader in ${jarPath} for Minecraft 26.3+`);
       return true;
     }
   } catch (err) {

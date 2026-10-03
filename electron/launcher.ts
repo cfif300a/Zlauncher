@@ -645,17 +645,18 @@ export class MinecraftLauncher {
       const nativesDir = path.join(versionDir, 'natives');
       fs.mkdirSync(nativesDir, { recursive: true });
 
-      const allLibraries = [
-        ...(versionData.libraries || []),
-        ...(inheritedData?.libraries || [])
-      ];
+      // Separate vanilla libraries and loader libraries for correct classpath ordering
+      const vanillaLibs = inheritedData ? (inheritedData.libraries || []) : (versionData.libraries || []);
+      const loaderLibs = inheritedData ? (versionData.libraries || []) : [];
+      const allLibraries = [...vanillaLibs, ...loaderLibs];
 
       const libraryTasks: DownloadTask[] = [];
-      const classpath: string[] = [];
+      const vanillaClasspath: string[] = [];
+      const loaderClasspath: string[] = [];
 
-      for (const lib of allLibraries) {
+      const processLibEntry = (lib: any, targetClasspath: string[]) => {
         if (!this.isRuleAllowed(lib.rules)) {
-          continue;
+          return;
         }
 
         // Native extraction if applicable
@@ -678,7 +679,7 @@ export class MinecraftLauncher {
         if (lib.downloads?.artifact) {
           const artifact = lib.downloads.artifact;
           const libPath = path.join(librariesDir, artifact.path);
-          classpath.push(libPath);
+          targetClasspath.push(libPath);
           if (!fs.existsSync(libPath)) {
             libraryTasks.push({
               url: artifact.url,
@@ -695,7 +696,7 @@ export class MinecraftLauncher {
           const filename = `${name}-${ver}.jar`;
           const relativePath = path.join(group, name, ver, filename);
           const libPath = path.join(librariesDir, relativePath);
-          classpath.push(libPath);
+          targetClasspath.push(libPath);
           if (!fs.existsSync(libPath)) {
             const repoUrl = lib.url.endsWith('/') ? lib.url : lib.url + '/';
             libraryTasks.push({
@@ -704,6 +705,13 @@ export class MinecraftLauncher {
             });
           }
         }
+      };
+
+      for (const lib of vanillaLibs) {
+        processLibEntry(lib, vanillaClasspath);
+      }
+      for (const lib of loaderLibs) {
+        processLibEntry(lib, loaderClasspath);
       }
 
       if (libraryTasks.length > 0) {
@@ -805,17 +813,21 @@ export class MinecraftLauncher {
       }
       const clientJarPath = path.join(versionsDir, vanillaVersion, `${vanillaVersion}.jar`);
 
-      if (fs.existsSync(clientJarPath)) {
-        if (!classpath.includes(clientJarPath)) {
-          classpath.push(clientJarPath);
-        }
-      } else {
+      if (!fs.existsSync(clientJarPath)) {
         console.warn('[ZLauncher] Client jar not found:', clientJarPath);
       }
 
-      if (versionId !== vanillaVersion && fs.existsSync(loaderJarPath) && !classpath.includes(loaderJarPath)) {
-        classpath.push(loaderJarPath);
-      }
+      // Exact classpath ordering:
+      // 1. Vanilla libraries (libraries/...)
+      // 2. Vanilla client JAR (versions/<vanillaVersion>/<vanillaVersion>.jar)
+      // 3. Mod loader libraries (fabric-loader, mixin, asm, etc.)
+      // 4. Loader client jar (if present)
+      const classpath: string[] = [
+        ...vanillaClasspath,
+        ...(fs.existsSync(clientJarPath) ? [clientJarPath] : []),
+        ...loaderClasspath,
+        ...(versionId !== vanillaVersion && fs.existsSync(loaderJarPath) ? [loaderJarPath] : []),
+      ];
 
       // Check and patch CustomSkinLoader in instance mods if present
       const instanceCslPath = path.join(gameDir, 'mods', 'CustomSkinLoader_Universal-15.0.1.jar');
@@ -1015,7 +1027,13 @@ export class MinecraftLauncher {
 
       // 5. Spawn Java process in instance directory
       onProgress({ status: 'Запуск Minecraft...', progress: 100 });
+      console.log('[ZLauncher] Java args:', launchCommandArgs.join(' '));
       console.log('[ZLauncher] Java command:', resolvedJavaPath, launchCommandArgs.join(' '));
+      onLog({
+        type: 'system',
+        text: `[ZLauncher] Java args: ${launchCommandArgs.join(' ')}\n`,
+        timestamp: new Date().toLocaleTimeString(),
+      });
       onLog({
         type: 'system',
         text: `[ZLauncher] Java command: ${resolvedJavaPath} ${launchCommandArgs.join(' ')}\n`,
