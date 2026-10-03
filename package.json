@@ -9,6 +9,7 @@
     "electron:dev": "vite",
     "electron:build": "vite build && tsc -p tsconfig.electron.json",
     "dist": "npm run electron:build && electron-builder --win",
+    "dist:dir": "npm run electron:build && electron-builder --win --dir",
     "dist:portable": "npm run electron:build && electron-builder --win portable",
     "dist:installer": "npm run electron:build && electron-builder --win nsis",
     "start": "electron ."
