@@ -510,6 +510,24 @@ export class MinecraftLauncher {
     return allowed;
   }
 
+  private extractArgumentValues(argEntry: any): string[] {
+    if (typeof argEntry === 'string') {
+      return [argEntry];
+    }
+    if (argEntry && typeof argEntry === 'object') {
+      if (argEntry.rules && !this.isRuleAllowed(argEntry.rules)) {
+        return [];
+      }
+      if (typeof argEntry.value === 'string') {
+        return [argEntry.value];
+      }
+      if (Array.isArray(argEntry.value)) {
+        return argEntry.value.filter((v: any) => typeof v === 'string');
+      }
+    }
+    return [];
+  }
+
   public async prepareAndLaunch(
     config: LaunchConfig,
     onProgress: (info: { status: string; progress: number; current?: number; total?: number; details?: string }) => void,
@@ -794,18 +812,20 @@ export class MinecraftLauncher {
       }
 
       // Add modern version JVM arguments if present
-      const versionJvmArgs = versionData.arguments?.jvm || inheritedData?.arguments?.jvm;
-      if (Array.isArray(versionJvmArgs)) {
-        for (const item of versionJvmArgs) {
-          if (typeof item === 'string') {
-            const replaced = item
-              .replace('${natives_directory}', nativesDir)
-              .replace('${launcher_name}', 'ZLauncher')
-              .replace('${launcher_version}', '1.0.0')
-              .replace('${classpath}', classpath.join(';'));
-            if (!jvmArgs.includes(replaced)) {
-              jvmArgs.push(replaced);
-            }
+      const rawJvmArgs = [
+        ...(Array.isArray(inheritedData?.arguments?.jvm) ? inheritedData.arguments.jvm : []),
+        ...(Array.isArray(versionData.arguments?.jvm) ? versionData.arguments.jvm : []),
+      ];
+      for (const item of rawJvmArgs) {
+        const values = this.extractArgumentValues(item);
+        for (const val of values) {
+          const replaced = val
+            .replace('${natives_directory}', nativesDir)
+            .replace('${launcher_name}', 'ZLauncher')
+            .replace('${launcher_version}', '1.0.0')
+            .replace('${classpath}', classpath.join(';'));
+          if (!jvmArgs.includes(replaced)) {
+            jvmArgs.push(replaced);
           }
         }
       }
@@ -818,14 +838,16 @@ export class MinecraftLauncher {
 
       // Game arguments
       const gameArgs: string[] = [];
-      const versionGameArgs = versionData.arguments?.game || inheritedData?.arguments?.game;
+      const rawGameArgs = [
+        ...(Array.isArray(inheritedData?.arguments?.game) ? inheritedData.arguments.game : []),
+        ...(Array.isArray(versionData.arguments?.game) ? versionData.arguments.game : []),
+      ];
 
-      if (Array.isArray(versionGameArgs)) {
+      if (rawGameArgs.length > 0) {
         // Modern format
-        for (const arg of versionGameArgs) {
-          if (typeof arg === 'string') {
-            gameArgs.push(arg);
-          }
+        for (const arg of rawGameArgs) {
+          const values = this.extractArgumentValues(arg);
+          gameArgs.push(...values);
         }
       } else if (versionData.minecraftArguments || inheritedData?.minecraftArguments) {
         // Legacy format
@@ -847,7 +869,7 @@ export class MinecraftLauncher {
       }
 
       // Replace placeholders in game arguments
-      const assetIndexName = assetIndex ? assetIndex.id : versionId;
+      const assetIndexName = assetIndex ? assetIndex.id : (inheritedData?.assetIndex?.id || versionId);
       for (let i = 0; i < gameArgs.length; i++) {
         let arg = gameArgs[i];
         arg = arg
@@ -859,7 +881,9 @@ export class MinecraftLauncher {
           .replace('${auth_uuid}', offlineUUID)
           .replace('${auth_access_token}', '0')
           .replace('${user_type}', 'mojang')
-          .replace('${version_type}', 'release');
+          .replace('${version_type}', 'release')
+          .replace('${clientid}', '0')
+          .replace('${auth_xuid}', '0');
 
         if (config.resolution) {
           arg = arg
@@ -870,17 +894,60 @@ export class MinecraftLauncher {
         gameArgs[i] = arg;
       }
 
+      // Mandatory guarantees: Minecraft MUST have these parameters regardless of version format quirks
+      const ensureArg = (flag: string, value: string) => {
+        const idx = gameArgs.indexOf(flag);
+        if (idx === -1) {
+          gameArgs.push(flag, value);
+        } else if (idx + 1 < gameArgs.length) {
+          const next = gameArgs[idx + 1];
+          if (!next || next.startsWith('${') || next === 'undefined') {
+            gameArgs[idx + 1] = value;
+          }
+        } else {
+          gameArgs.push(value);
+        }
+      };
+
+      ensureArg('--username', config.username);
+      ensureArg('--uuid', offlineUUID);
+      ensureArg('--version', versionId);
+      ensureArg('--gameDir', gameDir);
+      ensureArg('--assetsDir', assetsDir);
+      ensureArg('--assetIndex', assetIndexName);
+      ensureArg('--accessToken', '0');
+      ensureArg('--userType', 'mojang');
+      ensureArg('--versionType', 'release');
+
       // Resolution flags
       if (config.resolution) {
         if (config.resolution.fullscreen) {
-          gameArgs.push('--fullscreen');
+          if (!gameArgs.includes('--fullscreen')) {
+            gameArgs.push('--fullscreen');
+          }
         } else {
-          gameArgs.push('--width', config.resolution.width.toString());
-          gameArgs.push('--height', config.resolution.height.toString());
+          ensureArg('--width', config.resolution.width.toString());
+          ensureArg('--height', config.resolution.height.toString());
         }
       }
 
-      launchCommandArgs.push(...gameArgs);
+      // Clean up unresolved optional placeholders and disallowed demo mode
+      const finalGameArgs: string[] = [];
+      for (let i = 0; i < gameArgs.length; i++) {
+        const arg = gameArgs[i];
+        if (arg === '--demo') {
+          continue;
+        }
+        if (arg.startsWith('${') && arg.endsWith('}')) {
+          if (finalGameArgs.length > 0 && finalGameArgs[finalGameArgs.length - 1].startsWith('--')) {
+            finalGameArgs.pop();
+          }
+          continue;
+        }
+        finalGameArgs.push(arg);
+      }
+
+      launchCommandArgs.push(...finalGameArgs);
 
       // 5. Spawn Java process in instance directory
       onProgress({ status: 'Запуск Minecraft...', progress: 100 });
