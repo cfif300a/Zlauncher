@@ -273,7 +273,7 @@ export const ServersView: React.FC = () => {
                 placeholder="Например: Мой любимый сервер"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl bg-white/[0.05] border border-white/10 text-xs text-white focus:outline-none focus:border-emerald-500/50"
+                className="w-full px-4 py-2.5 rounded-xl bg-white/[0.05] border border-white/10 text-xs text-white focus:outline-none focus:border-emerald-500/50 select-text cursor-text"
               />
             </div>
 
@@ -285,7 +285,7 @@ export const ServersView: React.FC = () => {
                 required
                 value={newIp}
                 onChange={(e) => setNewIp(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl bg-white/[0.05] border border-white/10 text-xs text-white focus:outline-none focus:border-emerald-500/50 font-mono"
+                className="w-full px-4 py-2.5 rounded-xl bg-white/[0.05] border border-white/10 text-xs text-white focus:outline-none focus:border-emerald-500/50 font-mono select-text cursor-text"
               />
             </div>
 

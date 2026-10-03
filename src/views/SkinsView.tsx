@@ -20,6 +20,7 @@ interface SkinsViewProps {
   skinType: 'classic' | 'slim';
   onUpdateSkin: (url: string, type: 'classic' | 'slim') => void;
   username: string;
+  onShowToast?: (toast: { type: 'success' | 'error' | 'info'; title: string; message?: string }) => void;
 }
 
 export const SkinsView: React.FC<SkinsViewProps> = ({
@@ -27,6 +28,7 @@ export const SkinsView: React.FC<SkinsViewProps> = ({
   skinType,
   onUpdateSkin,
   username,
+  onShowToast,
 }) => {
   const [activeSkin, setActiveSkin] = useState(currentSkinUrl);
   const [activeModel, setActiveModel] = useState<'classic' | 'slim'>(skinType);
@@ -119,7 +121,13 @@ export const SkinsView: React.FC<SkinsViewProps> = ({
       }
     } catch (e) {
       sounds.playError();
-      alert('Не удалось найти скин для указанного никнейма');
+      if (onShowToast) {
+        onShowToast({
+          type: 'error',
+          title: 'Скин не найден',
+          message: 'Не удалось найти скин для указанного никнейма',
+        });
+      }
     } finally {
       setSearching(false);
     }
@@ -266,7 +274,7 @@ export const SkinsView: React.FC<SkinsViewProps> = ({
                 placeholder="Никнейм игрока..."
                 value={searchNick}
                 onChange={(e) => setSearchNick(e.target.value)}
-                className="w-full pl-3.5 pr-20 py-2.5 rounded-2xl bg-white/[0.04] border border-white/[0.08] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 shadow-inner"
+                className="w-full pl-3.5 pr-20 py-2.5 rounded-2xl bg-white/[0.04] border border-white/[0.08] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 shadow-inner select-text cursor-text"
               />
               <button
                 type="submit"

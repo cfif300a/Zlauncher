@@ -25,6 +25,7 @@ interface CreateInstanceModalProps {
   availableVersions: string[];
   initialLoader?: 'vanilla' | 'fabric' | 'forge' | 'neoforge' | 'quilt';
   initialVersion?: string;
+  onShowToast?: (toast: { type: 'success' | 'error' | 'info'; title: string; message?: string }) => void;
 }
 
 export const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({
@@ -34,6 +35,7 @@ export const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({
   availableVersions,
   initialLoader = 'fabric',
   initialVersion = '26.3',
+  onShowToast,
 }) => {
   const [name, setName] = useState('');
   const [selectedVersion, setSelectedVersion] = useState(initialVersion);
@@ -123,7 +125,15 @@ export const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({
       onClose();
     } catch (err: any) {
       sounds.playError();
-      alert(`Ошибка создания экземпляра: ${err.message}`);
+      if (onShowToast) {
+        onShowToast({
+          type: 'error',
+          title: 'Ошибка создания экземпляра',
+          message: err.message,
+        });
+      } else {
+        console.error(err);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -164,7 +174,7 @@ export const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({
             placeholder={`Например: Моя сборка ${selectedVersion}`}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full px-4 py-2.5 rounded-xl bg-white/[0.04] border border-white/10 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50"
+            className="w-full px-4 py-2.5 rounded-xl bg-white/[0.04] border border-white/10 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 select-text cursor-text"
           />
         </div>
 
@@ -276,7 +286,7 @@ export const CreateInstanceModal: React.FC<CreateInstanceModalProps> = ({
             {isSubmitting ? (
               <>
                 <Sparkles className="w-4 h-4 animate-spin" />
-                <span>Создание...</span>
+                <span>{selectedLoader !== 'vanilla' ? 'Загрузка файлов загрузчика...' : 'Создание...'}</span>
               </>
             ) : (
               <>

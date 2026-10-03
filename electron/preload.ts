@@ -139,7 +139,7 @@ const electronAPI = {
   // Modrinth integration
   searchModrinth: (query: string, options: { loader?: string; version?: string; projectType?: string; offset?: number; limit?: number }): Promise<{ hits: ModItem[]; total_hits: number }> =>
     ipcRenderer.invoke('search-modrinth', query, options),
-  installModrinthProject: (projectId: string, versionId?: string, projectType?: string, instanceId?: string, gameVersion?: string, loader?: string): Promise<{ success: boolean; filename: string }> =>
+  installModrinthProject: (projectId: string, versionId?: string, projectType?: string, instanceId?: string, gameVersion?: string, loader?: string): Promise<{ success: boolean; filename: string; dependencies?: string[] }> =>
     ipcRenderer.invoke('install-modrinth-project', projectId, versionId, projectType, instanceId, gameVersion, loader),
 
   // Mod manager

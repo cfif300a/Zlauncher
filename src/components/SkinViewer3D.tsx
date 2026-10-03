@@ -28,7 +28,7 @@ export const SkinViewer3D: React.FC<SkinViewer3DProps> = ({
     const canvas = canvasRef.current;
 
     // Default Steve skin fallback
-    const defaultSkin = 'https://textures.minecraft.net/texture/414e8a4a5be434f0e5eb9816008b4eb9d8463e26bb1785de11cf3fa244ee1a8f';
+    const defaultSkin = 'https://minotar.net/skin/MHF_Steve';
 
     const viewer = new skinview3d.SkinViewer({
       canvas: canvas,
@@ -37,6 +37,10 @@ export const SkinViewer3D: React.FC<SkinViewer3DProps> = ({
       skin: skinUrl || defaultSkin,
       model: isSlim ? 'slim' : 'default',
     });
+
+    if (viewer.renderer) {
+      viewer.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    }
 
     viewer.camera.position.z = 60;
     viewer.camera.position.y = 0;
@@ -205,16 +209,20 @@ export const SkinViewer3D: React.FC<SkinViewer3DProps> = ({
   }, [animation]);
 
   return (
-    <div className="relative flex flex-col items-center justify-center cursor-grab active:cursor-grabbing select-none group">
+    <div className="relative flex flex-col items-center justify-center cursor-grab active:cursor-grabbing select-none">
       {/* 3D Canvas */}
       <canvas
         ref={canvasRef}
-        className="rounded-2xl drop-shadow-[0_15px_35px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:scale-[1.02]"
+        className="rounded-2xl"
+        style={{
+          imageRendering: 'pixelated',
+          outline: 'none',
+        }}
       />
 
       {/* Holographic Glowing Pedestal */}
-      <div className="absolute -bottom-2 w-44 h-8 rounded-[100%] bg-gradient-to-r from-emerald-500/30 via-teal-400/40 to-cyan-500/30 blur-md pointer-events-none animate-pulse-slow" />
-      <div className="absolute -bottom-1 w-36 h-4 rounded-[100%] border border-emerald-400/30 shadow-[0_0_15px_rgba(16,185,129,0.5)] pointer-events-none" />
+      <div className="absolute -bottom-2 w-44 h-8 rounded-[100%] bg-gradient-to-r from-emerald-500/25 via-teal-400/35 to-cyan-500/25 blur-md pointer-events-none" />
+      <div className="absolute -bottom-1 w-36 h-4 rounded-[100%] border border-emerald-400/30 shadow-[0_0_15px_rgba(16,185,129,0.4)] pointer-events-none" />
     </div>
   );
 };

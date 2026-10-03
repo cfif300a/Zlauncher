@@ -95,6 +95,17 @@ function getInstancesDir(baseDir: string): string {
   return dir;
 }
 
+function getInstanceBaseDir(baseDir: string, instanceId?: string): string {
+  if (instanceId && instanceId !== 'default') {
+    const instDir = path.join(getInstancesDir(baseDir), instanceId);
+    if (!fs.existsSync(instDir)) {
+      fs.mkdirSync(instDir, { recursive: true });
+    }
+    return instDir;
+  }
+  return baseDir;
+}
+
 function syncInstancesFromDisk(existingInstances: Instance[] = [], baseDir: string): Instance[] {
   const instancesDir = getInstancesDir(baseDir);
   const map = new Map<string, Instance>();
@@ -463,6 +474,18 @@ ipcMain.handle('create-instance', async (_event, opts: {
     } catch (e) {
       console.warn('Quilt profile setup fallback:', e);
     }
+  } else if (opts.loader === 'forge') {
+    try {
+      versionId = await launcher.installForgeVersion(opts.minecraftVersion, baseDir);
+    } catch (e) {
+      console.warn('Forge profile setup fallback:', e);
+    }
+  } else if (opts.loader === 'neoforge') {
+    try {
+      versionId = await launcher.installNeoForgeVersion(opts.minecraftVersion, baseDir);
+    } catch (e) {
+      console.warn('NeoForge profile setup fallback:', e);
+    }
   }
 
   const newInstance: Instance = {
@@ -562,6 +585,24 @@ ipcMain.handle('install-fabric-version', async (_event, mcVersion: string) => {
   return launcher.installFabricVersion(mcVersion, gameDir);
 });
 
+ipcMain.handle('install-neoforge-version', async (_event, mcVersion: string) => {
+  const cfg = loadConfig();
+  const gameDir = cfg.gameDir || getDefaultGameDir();
+  return launcher.installNeoForgeVersion(mcVersion, gameDir);
+});
+
+ipcMain.handle('install-forge-version', async (_event, mcVersion: string) => {
+  const cfg = loadConfig();
+  const gameDir = cfg.gameDir || getDefaultGameDir();
+  return launcher.installForgeVersion(mcVersion, gameDir);
+});
+
+ipcMain.handle('install-quilt-version', async (_event, mcVersion: string) => {
+  const cfg = loadConfig();
+  const gameDir = cfg.gameDir || getDefaultGameDir();
+  return launcher.installQuiltVersion(mcVersion, gameDir);
+});
+
 // IPC: Game Lifecycle
 ipcMain.handle('launch-game', async (_event, options: LaunchConfig) => {
   if (launcher.isRunning()) {
@@ -658,14 +699,7 @@ ipcMain.handle('open-folder', async (_event, type: string, instanceId?: string) 
   const cfg = loadConfig();
   const baseDir = cfg.gameDir || getDefaultGameDir();
   const instId = instanceId || cfg.activeInstanceId;
-
-  let targetBase = baseDir;
-  if (instId && instId !== 'default') {
-    const instDir = path.join(baseDir, 'instances', instId);
-    if (fs.existsSync(instDir)) {
-      targetBase = instDir;
-    }
-  }
+  const targetBase = getInstanceBaseDir(baseDir, instId);
 
   let target = targetBase;
 
@@ -705,14 +739,7 @@ ipcMain.handle('get-screenshots', async (_event, instanceId?: string) => {
   const cfg = loadConfig();
   const baseDir = cfg.gameDir || getDefaultGameDir();
   const instId = instanceId || cfg.activeInstanceId;
-
-  let targetBase = baseDir;
-  if (instId && instId !== 'default') {
-    const instDir = path.join(baseDir, 'instances', instId);
-    if (fs.existsSync(instDir)) {
-      targetBase = instDir;
-    }
-  }
+  const targetBase = getInstanceBaseDir(baseDir, instId);
 
   const shotsDir = path.join(targetBase, 'screenshots');
   if (!fs.existsSync(shotsDir)) return [];
@@ -820,6 +847,147 @@ ipcMain.handle('search-modrinth', async (_event, query: string, options: any) =>
   }
 });
 
+async function downloadModWithDependencies(
+  versionData: any,
+  targetDir: string,
+  targetGameVersion: string,
+  targetLoader: string,
+  visitedProjects: Set<string> = new Set()
+): Promise<string[]> {
+  const downloadedFiles: string[] = [];
+  const projectId = versionData.project_id || versionData.id;
+
+  if (projectId) {
+    if (visitedProjects.has(projectId)) return downloadedFiles;
+    visitedProjects.add(projectId);
+  }
+  if (versionData.id) {
+    visitedProjects.add(versionData.id);
+  }
+
+  // 1. Download file for this version
+  const file = versionData.files?.find((f: any) => f.primary) || versionData.files?.[0];
+  if (file && file.url) {
+    fs.mkdirSync(targetDir, { recursive: true });
+    const destPath = path.join(targetDir, file.filename);
+    console.log(`[Modrinth] Скачивание ${file.filename} в ${destPath}...`);
+    const fileRes = await fetch(file.url, {
+      headers: { 'User-Agent': 'ZLauncher/1.0.0 (contact@zlauncher.local)' },
+    });
+    if (fileRes.ok) {
+      const buf = Buffer.from(await fileRes.arrayBuffer());
+      fs.writeFileSync(destPath, buf);
+      downloadedFiles.push(file.filename);
+      console.log(`[Modrinth] Успешно скачан: ${file.filename} (${buf.length} байт)`);
+    } else {
+      throw new Error(`Ошибка загрузки ${file.filename}: HTTP ${fileRes.status}`);
+    }
+  } else {
+    throw new Error('У выбранной версии отсутствует файл для загрузки');
+  }
+
+  // 2. Process required dependencies recursively
+  if (Array.isArray(versionData.dependencies) && versionData.dependencies.length > 0) {
+    for (const dep of versionData.dependencies) {
+      if (dep.dependency_type === 'required') {
+        const depProjId = dep.project_id;
+        const depVerId = dep.version_id;
+        if (depProjId && visitedProjects.has(depProjId)) continue;
+        if (depVerId && visitedProjects.has(depVerId)) continue;
+
+        try {
+          // If explicit version ID is specified for the dependency
+          if (depVerId) {
+            visitedProjects.add(depVerId);
+            const vRes = await fetch(
+              `https://api.modrinth.com/v2/version/${encodeURIComponent(depVerId)}`,
+              { headers: { 'User-Agent': 'ZLauncher/1.0.0 (contact@zlauncher.local)' } }
+            );
+            if (vRes.ok) {
+              const depVersionData = (await vRes.json()) as any;
+              if (depVersionData && depVersionData.project_id) {
+                visitedProjects.add(depVersionData.project_id);
+              }
+              const subDownloaded = await downloadModWithDependencies(
+                depVersionData,
+                targetDir,
+                targetGameVersion,
+                targetLoader,
+                visitedProjects
+              );
+              downloadedFiles.push(...subDownloaded);
+              continue;
+            }
+          }
+
+          // If project ID is specified, find matching version
+          if (depProjId) {
+            visitedProjects.add(depProjId);
+            const pRes = await fetch(
+              `https://api.modrinth.com/v2/project/${encodeURIComponent(depProjId)}/version`,
+              { headers: { 'User-Agent': 'ZLauncher/1.0.0 (contact@zlauncher.local)' } }
+            );
+            if (pRes.ok) {
+              const pVersions = (await pRes.json()) as any[];
+              if (Array.isArray(pVersions) && pVersions.length > 0) {
+                // Exact match: game version + loader
+                let matchedVer = pVersions.find(
+                  (v: any) =>
+                    Array.isArray(v.game_versions) &&
+                    v.game_versions.includes(targetGameVersion) &&
+                    Array.isArray(v.loaders) &&
+                    v.loaders.map((l: string) => l.toLowerCase()).includes(targetLoader)
+                );
+
+                // Minor version match + loader
+                if (!matchedVer) {
+                  const majorMinor = targetGameVersion.split('.').slice(0, 2).join('.');
+                  matchedVer = pVersions.find(
+                    (v: any) =>
+                      Array.isArray(v.game_versions) &&
+                      v.game_versions.some((gv: string) => gv.startsWith(majorMinor)) &&
+                      Array.isArray(v.loaders) &&
+                      v.loaders.map((l: string) => l.toLowerCase()).includes(targetLoader)
+                  );
+                }
+
+                // Loader match
+                if (!matchedVer && targetLoader && targetLoader !== 'vanilla' && targetLoader !== 'all') {
+                  matchedVer = pVersions.find(
+                    (v: any) =>
+                      Array.isArray(v.loaders) &&
+                      v.loaders.map((l: string) => l.toLowerCase()).includes(targetLoader)
+                  );
+                }
+
+                // Fallback to release
+                if (!matchedVer) {
+                  matchedVer = pVersions.find((v: any) => v.version_type === 'release') || pVersions[0];
+                }
+
+                if (matchedVer) {
+                  const subDownloaded = await downloadModWithDependencies(
+                    matchedVer,
+                    targetDir,
+                    targetGameVersion,
+                    targetLoader,
+                    visitedProjects
+                  );
+                  downloadedFiles.push(...subDownloaded);
+                }
+              }
+            }
+          }
+        } catch (depErr) {
+          console.warn(`[Modrinth Dep Warning] Ошибка загрузки зависимости ${dep.project_id || dep.version_id}:`, depErr);
+        }
+      }
+    }
+  }
+
+  return downloadedFiles;
+}
+
 ipcMain.handle(
   'install-modrinth-project',
   async (
@@ -840,16 +1008,9 @@ ipcMain.handle(
       const cfg = loadConfig();
       const baseDir = cfg.gameDir || getDefaultGameDir();
       const activeInstId = instanceId || cfg.activeInstanceId;
+      const targetBase = getInstanceBaseDir(baseDir, activeInstId);
 
       const targetInst = (cfg.instances || []).find((i: any) => i.id === activeInstId);
-      let targetBase = baseDir;
-      if (activeInstId && activeInstId !== 'default') {
-        const instDir = path.join(baseDir, 'instances', activeInstId);
-        if (fs.existsSync(instDir)) {
-          targetBase = instDir;
-        }
-      }
-
       const targetGameVersion = gameVersion || targetInst?.minecraftVersion || cfg.selectedVersion || '26.3';
       const targetLoader = (loader || targetInst?.loader || 'vanilla').toLowerCase();
 
@@ -894,14 +1055,7 @@ ipcMain.handle(
         );
       }
 
-      // 2. Exact match: game version (for shaders, resourcepacks, or any loader)
-      if (!selectedVersion) {
-        selectedVersion = versions.find((v: any) =>
-          Array.isArray(v.game_versions) && v.game_versions.includes(targetGameVersion)
-        );
-      }
-
-      // 3. Minor version prefix match with loader (e.g. 1.20.4 matches 1.20, or 26.2 matches 26.x)
+      // 2. Minor version prefix match with loader (e.g. 1.20.4 matches 1.20)
       if (!selectedVersion && targetLoader && targetLoader !== 'vanilla' && targetLoader !== 'all') {
         const majorMinor = targetGameVersion.split('.').slice(0, 2).join('.');
         selectedVersion = versions.find((v: any) =>
@@ -912,20 +1066,27 @@ ipcMain.handle(
         );
       }
 
-      // 4. Minor version prefix match without loader
+      // 3. For mods: any version matching loader
+      if (!selectedVersion && projectType === 'mod' && targetLoader && targetLoader !== 'vanilla' && targetLoader !== 'all') {
+        selectedVersion = versions.find((v: any) =>
+          Array.isArray(v.loaders) &&
+          v.loaders.map((l: string) => l.toLowerCase()).includes(targetLoader)
+        );
+      }
+
+      // 4. Exact match: game version (for shaders, resourcepacks)
+      if (!selectedVersion) {
+        selectedVersion = versions.find((v: any) =>
+          Array.isArray(v.game_versions) && v.game_versions.includes(targetGameVersion)
+        );
+      }
+
+      // 5. Minor version prefix match without loader
       if (!selectedVersion) {
         const majorMinor = targetGameVersion.split('.').slice(0, 2).join('.');
         selectedVersion = versions.find((v: any) =>
           Array.isArray(v.game_versions) &&
           v.game_versions.some((gv: string) => gv.startsWith(majorMinor))
-        );
-      }
-
-      // 5. Match loader if game version not found
-      if (!selectedVersion && targetLoader && targetLoader !== 'vanilla' && targetLoader !== 'all') {
-        selectedVersion = versions.find((v: any) =>
-          Array.isArray(v.loaders) &&
-          v.loaders.map((l: string) => l.toLowerCase()).includes(targetLoader)
         );
       }
 
@@ -937,17 +1098,42 @@ ipcMain.handle(
       const file = selectedVersion.files?.find((f: any) => f.primary) || selectedVersion.files?.[0];
       if (!file) throw new Error('В выбранной версии отсутствует скачиваемый файл');
 
-      console.log(`[Modrinth] Установка "${id}" (${selectedVersion.name}) для MC ${targetGameVersion} [${targetLoader}] -> ${file.filename}`);
+      console.log(`[Modrinth] Установка "${id}" (${selectedVersion.name}) для MC ${targetGameVersion} [${targetLoader}] в ${targetDir}`);
 
-      const destPath = path.join(targetDir, file.filename);
-      const fileRes = await fetch(file.url, {
-        headers: { 'User-Agent': 'ZLauncher/1.0.0 (contact@zlauncher.local)' },
-      });
-      if (!fileRes.ok) throw new Error(`Ошибка скачивания файла: ${fileRes.statusText}`);
-      const buf = Buffer.from(await fileRes.arrayBuffer());
-      fs.writeFileSync(destPath, buf);
+      // Download primary mod and all required dependencies recursively!
+      const downloadedFiles = await downloadModWithDependencies(
+        selectedVersion,
+        targetDir,
+        targetGameVersion,
+        targetLoader,
+        new Set<string>()
+      );
 
-      return { success: true, filename: file.filename };
+      const mainFilename = file.filename;
+      const mainPath = path.join(targetDir, mainFilename);
+      if (!fs.existsSync(mainPath)) {
+        throw new Error(`Файл "${mainFilename}" не был сохранен в папку ${targetDir}`);
+      }
+
+      if (activeInstId && activeInstId !== 'default') {
+        const instJsonPath = path.join(targetBase, 'instance.json');
+        if (fs.existsSync(instJsonPath)) {
+          try {
+            const instData = JSON.parse(fs.readFileSync(instJsonPath, 'utf8'));
+            if (fs.existsSync(targetDir)) {
+              const files = fs.readdirSync(targetDir);
+              instData.modsCount = files.filter((f: string) => f.endsWith('.jar') && !f.endsWith('.disabled')).length;
+              fs.writeFileSync(instJsonPath, JSON.stringify(instData, null, 2));
+            }
+          } catch (e) {}
+        }
+      }
+
+      return {
+        success: true,
+        filename: mainFilename,
+        dependencies: downloadedFiles.filter((f) => f !== mainFilename),
+      };
     } catch (err: any) {
       console.error('Failed to install modrinth project:', err);
       throw err;
@@ -960,14 +1146,7 @@ ipcMain.handle('get-installed-mods', async (_event, instanceId?: string) => {
   const cfg = loadConfig();
   const baseDir = cfg.gameDir || getDefaultGameDir();
   const instId = instanceId || cfg.activeInstanceId;
-
-  let targetBase = baseDir;
-  if (instId && instId !== 'default') {
-    const instDir = path.join(baseDir, 'instances', instId);
-    if (fs.existsSync(instDir)) {
-      targetBase = instDir;
-    }
-  }
+  const targetBase = getInstanceBaseDir(baseDir, instId);
 
   const modsDir = path.join(targetBase, 'mods');
   if (!fs.existsSync(modsDir)) return [];
@@ -988,21 +1167,14 @@ ipcMain.handle('get-installed-mods', async (_event, instanceId?: string) => {
     }
   }
 
-  return mods;
+  return mods.sort((a, b) => b.modified - a.modified);
 });
 
 ipcMain.handle('toggle-mod', async (_event, filename: string, enable: boolean, instanceId?: string) => {
   const cfg = loadConfig();
   const baseDir = cfg.gameDir || getDefaultGameDir();
   const instId = instanceId || cfg.activeInstanceId;
-
-  let targetBase = baseDir;
-  if (instId && instId !== 'default') {
-    const instDir = path.join(baseDir, 'instances', instId);
-    if (fs.existsSync(instDir)) {
-      targetBase = instDir;
-    }
-  }
+  const targetBase = getInstanceBaseDir(baseDir, instId);
 
   const modsDir = path.join(targetBase, 'mods');
   const currentPath = path.join(modsDir, filename);
@@ -1026,14 +1198,7 @@ ipcMain.handle('delete-mod', async (_event, filename: string, instanceId?: strin
   const cfg = loadConfig();
   const baseDir = cfg.gameDir || getDefaultGameDir();
   const instId = instanceId || cfg.activeInstanceId;
-
-  let targetBase = baseDir;
-  if (instId && instId !== 'default') {
-    const instDir = path.join(baseDir, 'instances', instId);
-    if (fs.existsSync(instDir)) {
-      targetBase = instDir;
-    }
-  }
+  const targetBase = getInstanceBaseDir(baseDir, instId);
 
   const fullPath = path.join(targetBase, 'mods', filename);
   if (fs.existsSync(fullPath)) {

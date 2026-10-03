@@ -14,6 +14,7 @@ import { ServersView } from './views/ServersView';
 import { GalleryView } from './views/GalleryView';
 import { ConsoleView } from './views/ConsoleView';
 import { SettingsView } from './views/SettingsView';
+import { Toast, ToastItem } from './components/Toast';
 import { sounds } from './utils/audio';
 import { LauncherConfig, VersionItem, ConsoleLogEntry, InstalledMod, Instance } from './types';
 import { User, Check, X } from 'lucide-react';
@@ -76,6 +77,17 @@ export const App: React.FC = () => {
   // Edit nickname modal
   const [showNickModal, setShowNickModal] = useState(false);
   const [newNick, setNewNick] = useState('');
+
+  // Global Toast notification state
+  const [toast, setToast] = useState<ToastItem | null>(null);
+
+  const showToast = (data: Omit<ToastItem, 'id'>) => {
+    sounds.playPop();
+    setToast({
+      ...data,
+      id: 'toast_' + Date.now(),
+    });
+  };
 
   const activeInstance =
     instances.find((i) => i.id === config.activeInstanceId) || instances[0];
@@ -330,16 +342,20 @@ export const App: React.FC = () => {
     const api = (window as any).electronAPI;
     if (!api) throw new Error('API недоступно');
 
+    const targetInstId = instanceId || activeInstance?.id;
+    const targetVersion = gameVersion || activeInstance?.minecraftVersion;
+    const targetLoader = loader || activeInstance?.loader;
+
     const res = await api.installModrinthProject(
       projectId,
       undefined,
       projectType,
-      instanceId || activeInstance?.id,
-      gameVersion || activeInstance?.minecraftVersion,
-      loader || activeInstance?.loader
+      targetInstId,
+      targetVersion,
+      targetLoader
     );
 
-    await loadMods(instanceId || activeInstance?.id);
+    await loadMods(targetInstId);
     await loadInstances();
     return res;
   };
@@ -490,6 +506,9 @@ export const App: React.FC = () => {
             <ModsView
               onInstallProject={handleInstallProject}
               activeInstance={activeInstance}
+              installedMods={installedMods}
+              onShowToast={showToast}
+              onNavigateTab={(tab) => setCurrentTab(tab)}
             />
           )}
 
@@ -509,6 +528,7 @@ export const App: React.FC = () => {
               skinType={config.skinType}
               onUpdateSkin={(url, type) => handleSaveConfig({ skinUrl: url, skinType: type })}
               username={config.username}
+              onShowToast={showToast}
             />
           )}
 
@@ -543,6 +563,7 @@ export const App: React.FC = () => {
         availableVersions={versions.map((v) => v.id)}
         initialLoader={initialLoaderForCreate}
         initialVersion={activeInstance?.minecraftVersion || '1.20.4'}
+        onShowToast={showToast}
       />
 
       {/* Change Nickname Modal */}
@@ -580,7 +601,7 @@ export const App: React.FC = () => {
                 maxLength={16}
                 pattern="^[a-zA-Z0-9_]{3,16}$"
                 title="От 3 до 16 символов (буквы, цифры и _)"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-white/[0.05] border border-white/10 text-sm font-mono text-white focus:outline-none focus:border-emerald-500/50"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white/[0.05] border border-white/10 text-sm font-mono text-white focus:outline-none focus:border-emerald-500/50 select-text cursor-text"
               />
               <span className="text-[10px] text-slate-500">
                 Допустимы латинские буквы, цифры и символ подчеркивания (3-16 знаков).
@@ -605,6 +626,9 @@ export const App: React.FC = () => {
           </form>
         </div>
       )}
+
+      {/* Modern floating toast banner notification at bottom */}
+      <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );
 };

@@ -142,6 +142,39 @@ export class MinecraftLauncher {
     fs.mkdirSync(versionDir, { recursive: true });
     fs.writeFileSync(path.join(versionDir, `${versionId}.json`), JSON.stringify(profileJson, null, 2));
 
+    // Download all Fabric loader libraries immediately
+    if (Array.isArray(profileJson.libraries)) {
+      const librariesDir = path.join(gameDir, 'libraries');
+      const libraryTasks: DownloadTask[] = [];
+
+      for (const lib of profileJson.libraries) {
+        if (!this.isRuleAllowed(lib.rules)) continue;
+        if (lib.name) {
+          const parts = lib.name.split(':');
+          const group = parts[0].replace(/\./g, '/');
+          const name = parts[1];
+          const ver = parts[2];
+          const filename = `${name}-${ver}.jar`;
+          const relativePath = path.join(group, name, ver, filename);
+          const libPath = path.join(librariesDir, relativePath);
+
+          if (!fs.existsSync(libPath)) {
+            const repoUrl = lib.url ? (lib.url.endsWith('/') ? lib.url : lib.url + '/') : 'https://maven.fabricmc.net/';
+            libraryTasks.push({
+              url: `${repoUrl}${group}/${name}/${ver}/${filename}`,
+              destination: libPath,
+            });
+          }
+        }
+      }
+
+      if (libraryTasks.length > 0) {
+        console.log(`[Fabric Install] Скачивание ${libraryTasks.length} файлов загрузчика Fabric...`);
+        await this.downloader.downloadBatch(libraryTasks);
+        console.log(`[Fabric Install] Все файлы Fabric успешно скачаны.`);
+      }
+    }
+
     return versionId;
   }
 
@@ -166,7 +199,282 @@ export class MinecraftLauncher {
     fs.mkdirSync(versionDir, { recursive: true });
     fs.writeFileSync(path.join(versionDir, `${versionId}.json`), JSON.stringify(profileJson, null, 2));
 
+    // Download all Quilt loader libraries immediately
+    if (Array.isArray(profileJson.libraries)) {
+      const librariesDir = path.join(gameDir, 'libraries');
+      const libraryTasks: DownloadTask[] = [];
+
+      for (const lib of profileJson.libraries) {
+        if (!this.isRuleAllowed(lib.rules)) continue;
+        if (lib.name) {
+          const parts = lib.name.split(':');
+          const group = parts[0].replace(/\./g, '/');
+          const name = parts[1];
+          const ver = parts[2];
+          const filename = `${name}-${ver}.jar`;
+          const relativePath = path.join(group, name, ver, filename);
+          const libPath = path.join(librariesDir, relativePath);
+
+          if (!fs.existsSync(libPath)) {
+            const repoUrl = lib.url ? (lib.url.endsWith('/') ? lib.url : lib.url + '/') : 'https://maven.quiltmc.org/repository/release/';
+            libraryTasks.push({
+              url: `${repoUrl}${group}/${name}/${ver}/${filename}`,
+              destination: libPath,
+            });
+          }
+        }
+      }
+
+      if (libraryTasks.length > 0) {
+        console.log(`[Quilt Install] Скачивание ${libraryTasks.length} файлов загрузчика Quilt...`);
+        await this.downloader.downloadBatch(libraryTasks);
+        console.log(`[Quilt Install] Все файлы Quilt успешно скачаны.`);
+      }
+    }
+
     return versionId;
+  }
+
+  public async installForgeVersion(gameVersion: string, gameDir: string): Promise<string> {
+    try {
+      const promosRes = await fetch('https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json', {
+        headers: { 'User-Agent': 'ZLauncher/1.0.0' },
+      });
+      if (!promosRes.ok) throw new Error('Не удалось получить список версий Forge');
+      const promosData = (await promosRes.json()) as any;
+      const forgeVer = promosData.promos?.[`${gameVersion}-recommended`] || promosData.promos?.[`${gameVersion}-latest`];
+      if (!forgeVer) throw new Error(`Forge не найден для версии ${gameVersion}`);
+
+      const versionId = `forge-${gameVersion}-${forgeVer}`;
+      const versionDir = path.join(gameDir, 'versions', versionId);
+      fs.mkdirSync(versionDir, { recursive: true });
+
+      const installerUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${gameVersion}-${forgeVer}/forge-${gameVersion}-${forgeVer}-installer.jar`;
+      const installerPath = path.join(versionDir, `forge-${gameVersion}-${forgeVer}-installer.jar`);
+
+      if (!fs.existsSync(installerPath)) {
+        console.log(`[Forge Install] Скачивание установщика Forge: ${installerUrl}`);
+        await this.downloader.downloadFile(installerUrl, installerPath);
+      }
+
+      let profileJson: any = null;
+      try {
+        const zip = new AdmZip(installerPath);
+        const verEntry = zip.getEntry('version.json');
+        if (verEntry) {
+          profileJson = JSON.parse(zip.readAsText(verEntry));
+        }
+      } catch (e) {
+        console.warn('[Forge Install] Не удалось прочитать version.json из jar:', e);
+      }
+
+      if (!profileJson) {
+        profileJson = {
+          id: versionId,
+          time: new Date().toISOString(),
+          releaseTime: new Date().toISOString(),
+          type: 'release',
+          mainClass: 'net.minecraft.client.main.Main',
+          inheritsFrom: gameVersion,
+          libraries: [
+            {
+              name: `net.minecraftforge:forge:${gameVersion}-${forgeVer}`,
+              url: 'https://maven.minecraftforge.net/',
+            },
+          ],
+        };
+      }
+
+      fs.writeFileSync(path.join(versionDir, `${versionId}.json`), JSON.stringify(profileJson, null, 2));
+      if (profileJson.id && profileJson.id !== versionId) {
+        fs.writeFileSync(path.join(versionDir, `${profileJson.id}.json`), JSON.stringify(profileJson, null, 2));
+      }
+
+      // Download all libraries immediately
+      if (Array.isArray(profileJson.libraries)) {
+        const librariesDir = path.join(gameDir, 'libraries');
+        const libraryTasks: DownloadTask[] = [];
+
+        for (const lib of profileJson.libraries) {
+          if (!this.isRuleAllowed(lib.rules)) continue;
+
+          if (lib.downloads?.artifact?.url && lib.downloads?.artifact?.path) {
+            const dest = path.join(librariesDir, lib.downloads.artifact.path);
+            if (!fs.existsSync(dest)) {
+              libraryTasks.push({
+                url: lib.downloads.artifact.url,
+                destination: dest,
+                sha1: lib.downloads.artifact.sha1,
+              });
+            }
+          } else if (lib.name) {
+            const parts = lib.name.split(':');
+            const group = parts[0].replace(/\./g, '/');
+            const name = parts[1];
+            const ver = parts[2]?.replace(/@.+$/, '');
+            const filename = `${name}-${ver}.jar`;
+            const relativePath = path.join(group, name, ver, filename);
+            const libPath = path.join(librariesDir, relativePath);
+
+            if (!fs.existsSync(libPath)) {
+              const repoUrl = lib.url ? (lib.url.endsWith('/') ? lib.url : lib.url + '/') : 'https://maven.minecraftforge.net/';
+              libraryTasks.push({
+                url: `${repoUrl}${group}/${name}/${ver}/${filename}`,
+                destination: libPath,
+              });
+            }
+          }
+        }
+
+        if (libraryTasks.length > 0) {
+          console.log(`[Forge Install] Скачивание ${libraryTasks.length} библиотек Forge...`);
+          await this.downloader.downloadBatch(libraryTasks);
+          console.log(`[Forge Install] Все библиотеки Forge успешно скачаны.`);
+        }
+      }
+
+      return versionId;
+    } catch (e: any) {
+      console.warn('[Forge Setup]', e);
+      return gameVersion;
+    }
+  }
+
+  public async installNeoForgeVersion(gameVersion: string, gameDir: string): Promise<string> {
+    try {
+      const parts = gameVersion.split('.');
+      const major = parts[1];
+      const minor = parts[2] || '0';
+
+      let installerUrl = '';
+      let versionId = '';
+      let neoVer = '';
+
+      if (gameVersion === '1.20.1') {
+        const metaRes = await fetch('https://maven.neoforged.net/releases/net/neoforged/forge/maven-metadata.xml', {
+          headers: { 'User-Agent': 'ZLauncher/1.0.0' },
+        });
+        if (!metaRes.ok) throw new Error('Не удалось получить метаданные NeoForge для 1.20.1');
+        const text = await metaRes.text();
+        const versions = [...text.matchAll(/<version>(.*?)<\/version>/g)].map((m) => m[1]);
+        const matching = versions.filter((v) => v.startsWith('1.20.1-'));
+        neoVer = matching.length > 0 ? matching[matching.length - 1] : '1.20.1-47.1.106';
+        versionId = `neoforge-${neoVer}`;
+        installerUrl = `https://maven.neoforged.net/releases/net/neoforged/forge/${neoVer}/forge-${neoVer}-installer.jar`;
+      } else {
+        const metaRes = await fetch('https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml', {
+          headers: { 'User-Agent': 'ZLauncher/1.0.0' },
+        });
+        if (!metaRes.ok) throw new Error('Не удалось получить метаданные NeoForge');
+        const text = await metaRes.text();
+        const versions = [...text.matchAll(/<version>(.*?)<\/version>/g)].map((m) => m[1]);
+        const prefix = `${major}.${minor}.`;
+        const matching = versions.filter((v) => v.startsWith(prefix));
+        if (matching.length === 0) {
+          const altMatching = versions.filter((v) => v.startsWith(`${major}.${minor}`));
+          if (altMatching.length === 0) {
+            throw new Error(`NeoForge не найден для версии Minecraft ${gameVersion}`);
+          }
+          neoVer = altMatching[altMatching.length - 1];
+        } else {
+          neoVer = matching[matching.length - 1];
+        }
+
+        versionId = `neoforge-${neoVer}`;
+        installerUrl = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${neoVer}/neoforge-${neoVer}-installer.jar`;
+      }
+
+      const versionDir = path.join(gameDir, 'versions', versionId);
+      fs.mkdirSync(versionDir, { recursive: true });
+
+      const installerPath = path.join(versionDir, `neoforge-${neoVer}-installer.jar`);
+      if (!fs.existsSync(installerPath)) {
+        console.log(`[NeoForge Install] Скачивание установщика NeoForge: ${installerUrl}`);
+        await this.downloader.downloadFile(installerUrl, installerPath);
+      }
+
+      // Extract version.json from installer if present
+      let profileJson: any = null;
+      try {
+        const zip = new AdmZip(installerPath);
+        const verEntry = zip.getEntry('version.json');
+        if (verEntry) {
+          profileJson = JSON.parse(zip.readAsText(verEntry));
+        }
+      } catch (e) {
+        console.warn('[NeoForge Install] Не удалось прочитать version.json из jar:', e);
+      }
+
+      if (!profileJson) {
+        profileJson = {
+          id: versionId,
+          time: new Date().toISOString(),
+          releaseTime: new Date().toISOString(),
+          type: 'release',
+          mainClass: 'net.minecraft.client.main.Main',
+          inheritsFrom: gameVersion,
+          libraries: [
+            {
+              name: `net.neoforged:neoforge:${neoVer}`,
+              url: 'https://maven.neoforged.net/releases/',
+            },
+          ],
+        };
+      }
+
+      fs.writeFileSync(path.join(versionDir, `${versionId}.json`), JSON.stringify(profileJson, null, 2));
+      if (profileJson.id && profileJson.id !== versionId) {
+        fs.writeFileSync(path.join(versionDir, `${profileJson.id}.json`), JSON.stringify(profileJson, null, 2));
+      }
+
+      // Download all libraries immediately
+      if (Array.isArray(profileJson.libraries)) {
+        const librariesDir = path.join(gameDir, 'libraries');
+        const libraryTasks: DownloadTask[] = [];
+
+        for (const lib of profileJson.libraries) {
+          if (!this.isRuleAllowed(lib.rules)) continue;
+
+          if (lib.downloads?.artifact?.url && lib.downloads?.artifact?.path) {
+            const dest = path.join(librariesDir, lib.downloads.artifact.path);
+            if (!fs.existsSync(dest)) {
+              libraryTasks.push({
+                url: lib.downloads.artifact.url,
+                destination: dest,
+                sha1: lib.downloads.artifact.sha1,
+              });
+            }
+          } else if (lib.name) {
+            const parts = lib.name.split(':');
+            const group = parts[0].replace(/\./g, '/');
+            const name = parts[1];
+            const ver = parts[2]?.replace(/@.+$/, '');
+            const filename = `${name}-${ver}.jar`;
+            const relativePath = path.join(group, name, ver, filename);
+            const libPath = path.join(librariesDir, relativePath);
+
+            if (!fs.existsSync(libPath)) {
+              const repoUrl = lib.url ? (lib.url.endsWith('/') ? lib.url : lib.url + '/') : 'https://maven.neoforged.net/releases/';
+              libraryTasks.push({
+                url: `${repoUrl}${group}/${name}/${ver}/${filename}`,
+                destination: libPath,
+              });
+            }
+          }
+        }
+
+        if (libraryTasks.length > 0) {
+          console.log(`[NeoForge Install] Скачивание ${libraryTasks.length} библиотек NeoForge...`);
+          await this.downloader.downloadBatch(libraryTasks);
+          console.log(`[NeoForge Install] Все библиотеки NeoForge успешно скачаны.`);
+        }
+      }
+
+      return versionId;
+    } catch (e: any) {
+      console.warn('[NeoForge Setup]', e);
+      return gameVersion;
+    }
   }
 
   private isRuleAllowed(rules?: any[]): boolean {

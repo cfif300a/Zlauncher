@@ -14,7 +14,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { sounds } from '../utils/audio';
-import { ModItem, Instance } from '../types';
+import { ModItem, Instance, InstalledMod } from '../types';
 
 interface ModsViewProps {
   onInstallProject: (
@@ -23,13 +23,26 @@ interface ModsViewProps {
     instanceId?: string,
     gameVersion?: string,
     loader?: string
-  ) => Promise<{ success: boolean; filename: string }>;
+  ) => Promise<{ success: boolean; filename: string; dependencies?: string[] }>;
   activeInstance?: Instance;
+  installedMods?: InstalledMod[];
+  onShowToast?: (toast: {
+    type: 'success' | 'error' | 'info';
+    title: string;
+    message?: string;
+    details?: string[];
+    actionLabel?: string;
+    onAction?: () => void;
+  }) => void;
+  onNavigateTab?: (tab: 'installed-mods') => void;
 }
 
 export const ModsView: React.FC<ModsViewProps> = ({
   onInstallProject,
   activeInstance,
+  installedMods,
+  onShowToast,
+  onNavigateTab,
 }) => {
   const [query, setQuery] = useState('');
   const [projectType, setProjectType] = useState<'mod' | 'shader' | 'resourcepack'>('mod');
@@ -98,26 +111,57 @@ export const ModsView: React.FC<ModsViewProps> = ({
     sounds.playClick();
     const targetId = mod.project_id || mod.slug || mod.id;
     if (!targetId) {
-      alert('Ошибка: идентификатор проекта Modrinth не найден');
+      if (onShowToast) {
+        onShowToast({
+          type: 'error',
+          title: 'Ошибка',
+          message: 'Идентификатор проекта Modrinth не найден',
+        });
+      }
       return;
     }
 
     setInstallingId(targetId);
     try {
+      const effectiveLoader = (activeInstance?.loader && activeInstance.loader !== 'vanilla')
+        ? activeInstance.loader
+        : (loader && loader !== 'all' ? loader : 'fabric');
+
       const res = await onInstallProject(
         targetId,
         projectType,
         activeInstance?.id,
         activeInstance?.minecraftVersion,
-        activeInstance?.loader
+        effectiveLoader
       );
-      if (res.success) {
+      if (res && res.success) {
         sounds.playPop();
         setInstalledIds((prev) => new Set([...prev, targetId]));
+        const depsCount = res.dependencies?.length || 0;
+        const msg = depsCount > 0
+          ? `Успешно установлен файл "${res.filename}" и ${depsCount} зависимостей.`
+          : `Файл "${res.filename}" успешно добавлен в сборку.`;
+
+        if (onShowToast) {
+          onShowToast({
+            type: 'success',
+            title: `Мод "${mod.title}" установлен!`,
+            message: msg,
+            details: res.dependencies && res.dependencies.length > 0 ? res.dependencies : undefined,
+            actionLabel: 'Мои моды',
+            onAction: () => onNavigateTab?.('installed-mods'),
+          });
+        }
       }
     } catch (e) {
       sounds.playError();
-      alert('Ошибка при установке мода: ' + (e as any)?.message);
+      if (onShowToast) {
+        onShowToast({
+          type: 'error',
+          title: 'Ошибка при установке мода',
+          message: (e as any)?.message || 'Не удалось скачать мод',
+        });
+      }
     } finally {
       setInstallingId(null);
     }
@@ -230,7 +274,7 @@ export const ModsView: React.FC<ModsViewProps> = ({
             }
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="w-full pl-10 pr-24 py-2.5 rounded-2xl bg-white/[0.04] border border-white/[0.08] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 shadow-inner"
+            className="w-full pl-10 pr-24 py-2.5 rounded-2xl bg-white/[0.04] border border-white/[0.08] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 shadow-inner select-text cursor-text"
           />
           <button
             type="submit"
@@ -271,7 +315,16 @@ export const ModsView: React.FC<ModsViewProps> = ({
           <div className="grid grid-cols-2 gap-3.5 pb-4">
             {mods.map((mod) => {
               const targetId = mod.project_id || mod.slug || mod.id;
-              const isInstalled = installedIds.has(targetId);
+              const isMatchByInstalledMods = installedMods?.some((m) => {
+                const fname = m.filename.toLowerCase();
+                const slug = (mod.slug || '').toLowerCase();
+                const titleSlug = (mod.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                return (
+                  (slug && fname.includes(slug)) ||
+                  (titleSlug.length > 3 && fname.replace(/[^a-z0-9]/g, '').includes(titleSlug))
+                );
+              });
+              const isInstalled = installedIds.has(targetId) || isMatchByInstalledMods;
               const isBusy = installingId === targetId;
 
               return (
@@ -297,6 +350,11 @@ export const ModsView: React.FC<ModsViewProps> = ({
                         <h3 className="font-black text-white text-xs truncate group-hover:text-emerald-300 transition-colors">
                           {mod.title}
                         </h3>
+                        {isInstalled && (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded-full font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 font-mono flex-shrink-0">
+                            <Check className="w-2.5 h-2.5 stroke-[3]" /> В сборке
+                          </span>
+                        )}
                         <span className="text-[10px] text-slate-500 truncate">от {mod.author}</span>
                       </div>
 
@@ -326,18 +384,22 @@ export const ModsView: React.FC<ModsViewProps> = ({
                   <button
                     onClick={() => handleInstall(mod)}
                     disabled={isBusy}
+                    title={isInstalled ? 'Нажмите, чтобы переустановить или обновить' : undefined}
                     className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-bold text-xs flex-shrink-0 transition-all ${
                       isInstalled
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                        : 'bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black shadow-[0_0_15px_rgba(16,185,129,0.3)]'
+                        ? 'bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 hover:text-white'
+                        : 'bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black shadow-[0_0_15px_rgba(16,185,129,0.3)] hover:scale-[1.02] active:scale-[0.98]'
                     } disabled:opacity-50`}
                   >
                     {isBusy ? (
-                      <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                      <>
+                        <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                        <span>Скачивание...</span>
+                      </>
                     ) : isInstalled ? (
                       <>
-                        <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                        <span>В сборке</span>
+                        <Check className="w-3.5 h-3.5 stroke-[3] text-emerald-400" />
+                        <span>Установлен</span>
                       </>
                     ) : (
                       <>

@@ -18,7 +18,6 @@ import {
   Flame,
   Radio,
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { SkinViewer3D } from '../components/SkinViewer3D';
 import { sounds } from '../utils/audio';
 import { LauncherConfig, VersionItem, Instance } from '../types';
@@ -64,20 +63,9 @@ export const PlayView: React.FC<PlayViewProps> = ({
 
   const handleLaunchClick = () => {
     if (isGameRunning) {
-      sounds.playError();
       onKill();
       return;
     }
-
-    sounds.playLevelUp();
-    try {
-      confetti({
-        particleCount: 65,
-        spread: 70,
-        origin: { y: 0.82 },
-        colors: ['#10b981', '#38bdf8', '#fbbf24', '#a855f7', '#34d399'],
-      });
-    } catch (e) {}
 
     onLaunch();
   };
