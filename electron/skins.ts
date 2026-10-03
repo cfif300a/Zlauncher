@@ -194,6 +194,28 @@ export function disableSkinPackInOptions(gameDir: string): void {
   }
 }
 
+export function patchCustomSkinLoaderJar(jarPath: string): boolean {
+  if (!fs.existsSync(jarPath)) return false;
+  try {
+    const zip = new AdmZip(jarPath);
+    const entry = zip.getEntry('customskinloader/mapping.xml');
+    if (!entry) return false;
+    let xml = entry.getData().toString('utf8');
+    if (!xml.includes(',800]') && (xml.includes(',774]') || xml.includes('773,774') || xml.includes('774,['))) {
+      xml = xml.replace(/,774\]/g, ',800]');
+      xml = xml.replace(/773,774/g, '773,774,775,776,777,778,779,780');
+      xml = xml.replace(/774,\[/g, '774,775,776,777,778,779,780,[');
+      zip.updateFile('customskinloader/mapping.xml', Buffer.from(xml, 'utf8'));
+      zip.writeZip(jarPath);
+      console.log(`[ZLauncher Skin] Patched CustomSkinLoader mapping.xml in ${jarPath} for protocol 777+`);
+      return true;
+    }
+  } catch (err) {
+    console.warn(`[ZLauncher Skin] Could not patch ${jarPath}:`, err);
+  }
+  return false;
+}
+
 export async function ensureCustomSkinLoaderMod(
   instanceDir: string,
   rootGameDir: string,
@@ -228,6 +250,9 @@ export async function ensureCustomSkinLoaderMod(
       }
     }
 
+    // Ensure mapping.xml inside cached jar supports Minecraft 26.3+ (protocol 777+)
+    patchCustomSkinLoaderJar(cachedJarPath);
+
     // Copy to instance mods directory
     const modsDir = path.join(instanceDir, 'mods');
     fs.mkdirSync(modsDir, { recursive: true });
@@ -236,6 +261,7 @@ export async function ensureCustomSkinLoaderMod(
       fs.copyFileSync(cachedJarPath, targetModPath);
       console.log(`[ZLauncher Skin] Installed CustomSkinLoader Universal to ${targetModPath}`);
     }
+    patchCustomSkinLoaderJar(targetModPath);
 
     // Configure CustomSkinLoader.json with multi-source loadlist
     const cslConfig = {

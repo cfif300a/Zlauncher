@@ -5,6 +5,7 @@ import { spawn, ChildProcess } from 'child_process';
 import AdmZip from 'adm-zip';
 import { FastDownloader, DownloadTask } from './downloader';
 import { getRequiredJavaMajor, ensureJavaRuntime } from './javaManager';
+import { patchCustomSkinLoaderJar } from './skins';
 
 export interface LaunchConfig {
   username: string;
@@ -792,11 +793,34 @@ export class MinecraftLauncher {
       onProgress({ status: 'Формирование параметров запуска...', progress: 95 });
 
       // Always guarantee the vanilla client jar is in classpath (required by CustomSkinLoader, Fabric Knot, Forge)
-      if (fs.existsSync(vanillaJarPath) && !classpath.includes(vanillaJarPath)) {
-        classpath.push(vanillaJarPath);
+      const profileJsonPath = path.join(versionsDir, versionId, `${versionId}.json`);
+      let vanillaVersion = vanillaVersionId;
+      if (fs.existsSync(profileJsonPath)) {
+        try {
+          const profileJson = JSON.parse(fs.readFileSync(profileJsonPath, 'utf-8'));
+          vanillaVersion = profileJson.inheritsFrom || versionId;
+        } catch (e) {
+          vanillaVersion = vanillaVersionId;
+        }
       }
-      if (versionId !== vanillaVersionId && fs.existsSync(loaderJarPath) && !classpath.includes(loaderJarPath)) {
+      const clientJarPath = path.join(versionsDir, vanillaVersion, `${vanillaVersion}.jar`);
+
+      if (fs.existsSync(clientJarPath)) {
+        if (!classpath.includes(clientJarPath)) {
+          classpath.push(clientJarPath);
+        }
+      } else {
+        console.warn('[ZLauncher] Client jar not found:', clientJarPath);
+      }
+
+      if (versionId !== vanillaVersion && fs.existsSync(loaderJarPath) && !classpath.includes(loaderJarPath)) {
         classpath.push(loaderJarPath);
+      }
+
+      // Check and patch CustomSkinLoader in instance mods if present
+      const instanceCslPath = path.join(gameDir, 'mods', 'CustomSkinLoader_Universal-15.0.1.jar');
+      if (fs.existsSync(instanceCslPath)) {
+        patchCustomSkinLoaderJar(instanceCslPath);
       }
 
       // Mirror version files into instance directory if isolated instance so mods can locate version.json
@@ -991,6 +1015,12 @@ export class MinecraftLauncher {
 
       // 5. Spawn Java process in instance directory
       onProgress({ status: 'Запуск Minecraft...', progress: 100 });
+      console.log('[ZLauncher] Java command:', resolvedJavaPath, launchCommandArgs.join(' '));
+      onLog({
+        type: 'system',
+        text: `[ZLauncher] Java command: ${resolvedJavaPath} ${launchCommandArgs.join(' ')}\n`,
+        timestamp: new Date().toLocaleTimeString(),
+      });
       onLog({
         type: 'system',
         text: `[ZLauncher] Запуск игры:\nПапка игры (gameDir): ${gameDir}\nJava (v${requiredJavaMajor}): ${resolvedJavaPath}\nИгрок: ${config.username} (${offlineUUID})\nВерсия: ${versionId}\nОЗУ: ${config.maxRam}MB\n`,
