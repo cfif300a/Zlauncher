@@ -5,6 +5,8 @@ import os from 'os';
 import { execSync } from 'child_process';
 import { MinecraftLauncher, getDefaultGameDir, LaunchConfig } from './launcher';
 import { installOfflineSkin } from './skins';
+import { detectInstalledJavas, downloadJavaRuntime } from './javaManager';
+import { installMrpack } from './mrpackManager';
 
 let mainWindow: BrowserWindow | null = null;
 const launcher = new MinecraftLauncher();
@@ -222,76 +224,10 @@ function saveConfig(cfg: any) {
   }
 }
 
-function detectJavaInstallations(): { path: string; version: string; isDefault: boolean }[] {
-  const javaList: { path: string; version: string; isDefault: boolean }[] = [];
-  const checkedPaths = new Set<string>();
-
-  const checkJava = (execPath: string, isDef: boolean = false) => {
-    if (!execPath || checkedPaths.has(execPath)) return;
-    checkedPaths.add(execPath);
-
-    if (fs.existsSync(execPath)) {
-      try {
-        const out = execSync(`"${execPath}" -version 2>&1`, { encoding: 'utf8', timeout: 3000 });
-        const match = out.match(/(?:version|Runtime Environment)\s+["']?([0-9._]+)/i) || out.match(/build\s+([0-9._]+)/i);
-        const version = match ? match[1] : 'Java (Unknown version)';
-        javaList.push({
-          path: execPath,
-          version: `Java ${version}`,
-          isDefault: isDef,
-        });
-      } catch (e) {
-        // Not a working java executable
-      }
-    }
-  };
-
-  // 1. Check system PATH 'java'
-  try {
-    const whichJava = execSync(process.platform === 'win32' ? 'where java' : 'which java', { encoding: 'utf8', timeout: 3000 })
-      .trim()
-      .split(/\r?\n/)[0];
-    if (whichJava) {
-      checkJava(whichJava, true);
-    }
-  } catch (e) {
-    // No java in PATH
-  }
-
-  // 2. Check JAVA_HOME
-  if (process.env.JAVA_HOME) {
-    const homeJava = path.join(process.env.JAVA_HOME, 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
-    checkJava(homeJava);
-  }
-
-  // 3. Scan common paths on Windows
-  if (process.platform === 'win32') {
-    const searchDirs = [
-      'C:\\Program Files\\Java',
-      'C:\\Program Files (x86)\\Java',
-      'C:\\Program Files\\Eclipse Adoptium',
-      'C:\\Program Files\\BellSoft',
-      'C:\\Program Files\\Microsoft',
-      'C:\\Program Files\\Amazon Corretto',
-      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Eclipse Adoptium'),
-    ];
-
-    for (const sDir of searchDirs) {
-      if (fs.existsSync(sDir)) {
-        try {
-          const subs = fs.readdirSync(sDir, { withFileTypes: true });
-          for (const sub of subs) {
-            if (sub.isDirectory()) {
-              const jPath = path.join(sDir, sub.name, 'bin', 'java.exe');
-              checkJava(jPath);
-            }
-          }
-        } catch (e) {}
-      }
-    }
-  }
-
-  return javaList;
+function detectJavaInstallations(): { path: string; version: string; isDefault: boolean; majorVersion?: number; isInternal?: boolean }[] {
+  const cfg = loadConfig();
+  const baseDir = cfg.gameDir || getDefaultGameDir();
+  return detectInstalledJavas(baseDir);
 }
 
 function createWindow() {
@@ -433,6 +369,15 @@ ipcMain.handle('select-java-file', async () => {
     return result.filePaths[0];
   }
   return null;
+});
+
+ipcMain.handle('download-java-runtime', async (_event, majorVersion: number) => {
+  const cfg = loadConfig();
+  const baseDir = cfg.gameDir || getDefaultGameDir();
+  const exe = await downloadJavaRuntime(majorVersion, baseDir, (status, pct) => {
+    mainWindow?.webContents.send('launch-progress', { status, progress: pct });
+  });
+  return { success: true, path: exe };
 });
 
 // IPC: Instances Management
@@ -601,6 +546,43 @@ ipcMain.handle('install-quilt-version', async (_event, mcVersion: string) => {
   const cfg = loadConfig();
   const gameDir = cfg.gameDir || getDefaultGameDir();
   return launcher.installQuiltVersion(mcVersion, gameDir);
+});
+
+// IPC: Modpack (.mrpack) Management
+ipcMain.handle('select-mrpack-file', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Выберите файл сборки .mrpack',
+    filters: [
+      { name: 'Сборка Modrinth (*.mrpack)', extensions: ['mrpack'] },
+      { name: 'Все файлы', extensions: ['*'] },
+    ],
+    properties: ['openFile'],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('install-mrpack', async (_event, opts: { projectId?: string; versionId?: string; filePath?: string }) => {
+  const cfg = loadConfig();
+  const baseDir = cfg.gameDir || getDefaultGameDir();
+  const result = await installMrpack({
+    ...opts,
+    rootGameDir: baseDir,
+    launcher,
+    onProgress: (info) => {
+      mainWindow?.webContents.send('mrpack-progress', info);
+    },
+  });
+
+  const currentCfg = loadConfig();
+  const mergedInstances = syncInstancesFromDisk(currentCfg.instances || [], baseDir);
+  currentCfg.instances = mergedInstances;
+  currentCfg.activeInstanceId = result.instanceId;
+  currentCfg.selectedVersion = result.versionId;
+  saveConfig(currentCfg);
+
+  return result;
 });
 
 // IPC: Game Lifecycle
@@ -814,9 +796,9 @@ ipcMain.handle('search-modrinth', async (_event, query: string, options: any) =>
       facets.push([`project_type:${options.projectType}`]);
     }
 
-    // Mod loader category ONLY applies to mods (never shaders or resource packs!)
+    // Mod loader category applies to mods and modpacks (never shaders or resource packs!)
     if (
-      (!options?.projectType || options.projectType === 'mod') &&
+      (!options?.projectType || options.projectType === 'mod' || options.projectType === 'modpack') &&
       options?.loader &&
       options.loader !== 'all' &&
       options.loader !== 'vanilla'
@@ -1029,6 +1011,34 @@ ipcMain.handle(
       const targetInst = (cfg.instances || []).find((i: any) => i.id === activeInstId);
       const targetGameVersion = gameVersion || targetInst?.minecraftVersion || cfg.selectedVersion || '26.3';
       const targetLoader = (loader || targetInst?.loader || 'vanilla').toLowerCase();
+
+      // If installing a modpack, delegate to mrpack installer to create a dedicated instance
+      if (projectType === 'modpack') {
+        const mrpackRes = await installMrpack({
+          projectId: id,
+          versionId,
+          rootGameDir: baseDir,
+          launcher,
+          onProgress: (info) => {
+            mainWindow?.webContents.send('mrpack-progress', info);
+          },
+        });
+
+        const currentCfg = loadConfig();
+        const mergedInstances = syncInstancesFromDisk(currentCfg.instances || [], baseDir);
+        currentCfg.instances = mergedInstances;
+        currentCfg.activeInstanceId = mrpackRes.instanceId;
+        currentCfg.selectedVersion = mrpackRes.versionId;
+        saveConfig(currentCfg);
+
+        return {
+          success: true,
+          filename: mrpackRes.name,
+          dependencies: [],
+          instanceId: mrpackRes.instanceId,
+          modsCount: mrpackRes.modsCount,
+        };
+      }
 
       // Target directory inside the active instance
       let targetDir = path.join(targetBase, 'mods');

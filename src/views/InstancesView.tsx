@@ -14,6 +14,7 @@ import {
   HardDrive,
   Calendar,
   Sparkles,
+  Download,
 } from 'lucide-react';
 import { sounds } from '../utils/audio';
 import { Instance } from '../types';
@@ -25,6 +26,7 @@ interface InstancesViewProps {
   onOpenCreateModal: () => void;
   onDeleteInstance: (id: string) => void;
   onOpenInstanceFolder: (id: string) => void;
+  onImportMrpack?: () => void;
 }
 
 export const InstancesView: React.FC<InstancesViewProps> = ({
@@ -34,6 +36,7 @@ export const InstancesView: React.FC<InstancesViewProps> = ({
   onOpenCreateModal,
   onDeleteInstance,
   onOpenInstanceFolder,
+  onImportMrpack,
 }) => {
   const getLoaderDetails = (loader: string) => {
     switch (loader) {
@@ -108,16 +111,29 @@ export const InstancesView: React.FC<InstancesViewProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            sounds.playLevelUp();
-            onOpenCreateModal();
-          }}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs uppercase tracking-wider transition-all shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:scale-[1.02] active:scale-[0.98]"
-        >
-          <Plus className="w-4 h-4 stroke-[3]" />
-          <span>Создать экземпляр</span>
-        </button>
+        <div className="flex items-center gap-2.5">
+          {onImportMrpack && (
+            <button
+              onClick={onImportMrpack}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 font-bold text-xs uppercase tracking-wider transition-all hover:scale-[1.02] active:scale-[0.98]"
+              title="Импортировать готовую сборку .mrpack с компьютера"
+            >
+              <Download className="w-4 h-4 text-purple-400" />
+              <span>Импорт .mrpack</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => {
+              sounds.playLevelUp();
+              onOpenCreateModal();
+            }}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs uppercase tracking-wider transition-all shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:scale-[1.02] active:scale-[0.98]"
+          >
+            <Plus className="w-4 h-4 stroke-[3]" />
+            <span>Создать экземпляр</span>
+          </button>
+        </div>
       </div>
 
       {/* Summary KPI Cards */}

@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { spawn, ChildProcess } from 'child_process';
 import AdmZip from 'adm-zip';
 import { FastDownloader, DownloadTask } from './downloader';
+import { getRequiredJavaMajor, ensureJavaRuntime } from './javaManager';
 
 export interface LaunchConfig {
   username: string;
@@ -121,15 +122,17 @@ export class MinecraftLauncher {
     return installed;
   }
 
-  public async installFabricVersion(gameVersion: string, gameDir: string): Promise<string> {
-    const loadersRes = await fetch(`https://meta.fabricmc.net/v2/versions/loader/${gameVersion}`, {
-      headers: { 'User-Agent': 'ZLauncher/1.0.0' },
-    });
-    if (!loadersRes.ok) throw new Error(`Fabric не доступен для версии Minecraft ${gameVersion}`);
-    const loaders = (await loadersRes.json()) as any;
-    if (!loaders || loaders.length === 0) throw new Error(`Загрузчики Fabric не найдены для ${gameVersion}`);
-
-    const loaderVersion = loaders[0].loader.version;
+  public async installFabricVersion(gameVersion: string, gameDir: string, specificLoaderVersion?: string): Promise<string> {
+    let loaderVersion = specificLoaderVersion;
+    if (!loaderVersion) {
+      const loadersRes = await fetch(`https://meta.fabricmc.net/v2/versions/loader/${gameVersion}`, {
+        headers: { 'User-Agent': 'ZLauncher/1.0.0' },
+      });
+      if (!loadersRes.ok) throw new Error(`Fabric не доступен для версии Minecraft ${gameVersion}`);
+      const loaders = (await loadersRes.json()) as any;
+      if (!loaders || loaders.length === 0) throw new Error(`Загрузчики Fabric не найдены для ${gameVersion}`);
+      loaderVersion = loaders[0].loader.version;
+    }
     const profileRes = await fetch(
       `https://meta.fabricmc.net/v2/versions/loader/${gameVersion}/${loaderVersion}/profile/json`,
       { headers: { 'User-Agent': 'ZLauncher/1.0.0' } }
@@ -178,15 +181,17 @@ export class MinecraftLauncher {
     return versionId;
   }
 
-  public async installQuiltVersion(gameVersion: string, gameDir: string): Promise<string> {
-    const loadersRes = await fetch(`https://meta.quiltmc.org/v3/versions/loader/${gameVersion}`, {
-      headers: { 'User-Agent': 'ZLauncher/1.0.0' },
-    });
-    if (!loadersRes.ok) throw new Error(`Quilt не доступен для версии Minecraft ${gameVersion}`);
-    const loaders = (await loadersRes.json()) as any;
-    if (!loaders || loaders.length === 0) throw new Error(`Загрузчики Quilt не найдены для ${gameVersion}`);
-
-    const loaderVersion = loaders[0].loader.version;
+  public async installQuiltVersion(gameVersion: string, gameDir: string, specificLoaderVersion?: string): Promise<string> {
+    let loaderVersion = specificLoaderVersion;
+    if (!loaderVersion) {
+      const loadersRes = await fetch(`https://meta.quiltmc.org/v3/versions/loader/${gameVersion}`, {
+        headers: { 'User-Agent': 'ZLauncher/1.0.0' },
+      });
+      if (!loadersRes.ok) throw new Error(`Quilt не доступен для версии Minecraft ${gameVersion}`);
+      const loaders = (await loadersRes.json()) as any;
+      if (!loaders || loaders.length === 0) throw new Error(`Загрузчики Quilt не найдены для ${gameVersion}`);
+      loaderVersion = loaders[0].loader.version;
+    }
     const profileRes = await fetch(
       `https://meta.quiltmc.org/v3/versions/loader/${gameVersion}/${loaderVersion}/profile/json`,
       { headers: { 'User-Agent': 'ZLauncher/1.0.0' } }
@@ -566,6 +571,37 @@ export class MinecraftLauncher {
         }
       }
 
+      // Check & ensure compatible Java runtime
+      const requiredJavaMajor = getRequiredJavaMajor(versionData, inheritedData, versionId);
+      onProgress({
+        status: `Проверка Java (требуется версия ${requiredJavaMajor})...`,
+        progress: 12,
+      });
+
+      let resolvedJavaPath = config.javaPath;
+      try {
+        resolvedJavaPath = await ensureJavaRuntime(
+          requiredJavaMajor,
+          rootGameDir,
+          config.javaPath,
+          (status, pct) => {
+            onProgress({ status, progress: pct });
+            onLog({
+              type: 'system',
+              text: `[ZLauncher Java] ${status}\n`,
+              timestamp: new Date().toLocaleTimeString(),
+            });
+          }
+        );
+      } catch (javaErr: any) {
+        onLog({
+          type: 'stderr',
+          text: `[ZLauncher Java Warning] Не удалось подготовить Java ${requiredJavaMajor}: ${javaErr.message}\n`,
+          timestamp: new Date().toLocaleTimeString(),
+        });
+        if (!resolvedJavaPath) resolvedJavaPath = 'java';
+      }
+
       // 1. Download Client JAR
       onProgress({ status: 'Проверка игрового клиента (client.jar)...', progress: 15 });
       const clientJarName = `${inheritedData ? versionData.inheritsFrom : versionId}.jar`;
@@ -850,11 +886,11 @@ export class MinecraftLauncher {
       onProgress({ status: 'Запуск Minecraft...', progress: 100 });
       onLog({
         type: 'system',
-        text: `[ZLauncher] Запуск игры:\nПапка игры (gameDir): ${gameDir}\nJava: ${config.javaPath}\nИгрок: ${config.username} (${offlineUUID})\nВерсия: ${versionId}\nОЗУ: ${config.maxRam}MB\n`,
+        text: `[ZLauncher] Запуск игры:\nПапка игры (gameDir): ${gameDir}\nJava (v${requiredJavaMajor}): ${resolvedJavaPath}\nИгрок: ${config.username} (${offlineUUID})\nВерсия: ${versionId}\nОЗУ: ${config.maxRam}MB\n`,
         timestamp: new Date().toLocaleTimeString(),
       });
 
-      const proc = spawn(config.javaPath, launchCommandArgs, {
+      const proc = spawn(resolvedJavaPath, launchCommandArgs, {
         cwd: gameDir,
         detached: false,
         env: {

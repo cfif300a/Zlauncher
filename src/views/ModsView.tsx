@@ -11,6 +11,8 @@ import {
   Palette,
   Eye,
   Filter,
+  Layers,
+  Upload,
 } from 'lucide-react';
 import { sounds } from '../utils/audio';
 import { ModItem, Instance, InstalledMod } from '../types';
@@ -44,7 +46,7 @@ export const ModsView: React.FC<ModsViewProps> = ({
   onNavigateTab,
 }) => {
   const [query, setQuery] = useState('');
-  const [projectType, setProjectType] = useState<'mod' | 'shader' | 'resourcepack'>('mod');
+  const [projectType, setProjectType] = useState<'mod' | 'modpack' | 'shader' | 'resourcepack'>('mod');
   const [loader, setLoader] = useState<'fabric' | 'forge' | 'neoforge' | 'quilt' | 'all'>(
     (activeInstance?.loader as any) || 'fabric'
   );
@@ -59,8 +61,22 @@ export const ModsView: React.FC<ModsViewProps> = ({
   const [loading, setLoading] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
+  const [packProgress, setPackProgress] = useState<{ status: string; progress: number; current?: number; total?: number } | null>(null);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Listen to live modpack installation progress
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (!api?.onMrpackProgress) return;
+    const unsub = api.onMrpackProgress((data: any) => {
+      setPackProgress(data);
+      if (data.progress >= 100) {
+        setTimeout(() => setPackProgress(null), 3000);
+      }
+    });
+    return () => unsub?.();
+  }, []);
 
   // Context-aware Quick Search Chips
   const modChips = [
@@ -72,6 +88,17 @@ export const ModsView: React.FC<ModsViewProps> = ({
     { label: '📖 Рецепты JEI', search: 'jei' },
     { label: '🌌 Память FerriteCore', search: 'ferritecore' },
     { label: '🔊 Звуки шагов', search: 'presence footsteps' },
+  ];
+
+  const modpackChips = [
+    { label: '🚀 Fabulously Optimized', search: 'fabulously optimized' },
+    { label: '🐾 Cobblemon', search: 'cobblemon' },
+    { label: '⚡ Simply Optimized', search: 'simply optimized' },
+    { label: '🏰 Medieval MC', search: 'medieval' },
+    { label: '⚙️ Better MC', search: 'better mc' },
+    { label: '🧟 Zombie 100 Days', search: 'zombie' },
+    { label: '🌌 All the Mods', search: 'all the mods' },
+    { label: '✨ Adrenaline', search: 'adrenaline' },
   ];
 
   const shaderChips = [
@@ -101,12 +128,14 @@ export const ModsView: React.FC<ModsViewProps> = ({
       ? shaderChips
       : projectType === 'resourcepack'
       ? resourcePackChips
+      : projectType === 'modpack'
+      ? modpackChips
       : modChips;
 
   const searchProjects = async (
     customQuery?: string,
     targetPage: number = 1,
-    customType?: 'mod' | 'shader' | 'resourcepack',
+    customType?: 'mod' | 'modpack' | 'shader' | 'resourcepack',
     customLoader?: string,
     customFilterVersion?: boolean
   ) => {
@@ -127,7 +156,7 @@ export const ModsView: React.FC<ModsViewProps> = ({
       if ((window as any).electronAPI) {
         const res = await (window as any).electronAPI.searchModrinth(q, {
           projectType: type,
-          loader: type === 'mod' && effLoader !== 'all' ? effLoader : undefined,
+          loader: (type === 'mod' || type === 'modpack') && effLoader !== 'all' ? effLoader : undefined,
           version: shouldFilterVersion ? activeInstance?.minecraftVersion : undefined,
           limit: pageSize,
           offset,
@@ -168,13 +197,44 @@ export const ModsView: React.FC<ModsViewProps> = ({
     searchProjects(term, 1);
   };
 
-  const handleTypeChange = (newType: 'mod' | 'shader' | 'resourcepack') => {
+  const handleTypeChange = (newType: 'mod' | 'modpack' | 'shader' | 'resourcepack') => {
     sounds.playClick();
     setProjectType(newType);
     setQuery('');
     setPage(1);
     setFilterByVersion(false);
     searchProjects('', 1, newType, loader, false);
+  };
+
+  const handleImportMrpack = async () => {
+    sounds.playClick();
+    const api = (window as any).electronAPI;
+    if (!api?.selectMrpackFile || !api?.installMrpack) return;
+    try {
+      const filePath = await api.selectMrpackFile();
+      if (!filePath) return;
+      setLoading(true);
+      const res = await api.installMrpack({ filePath });
+      sounds.playLevelUp();
+      if (onShowToast) {
+        onShowToast({
+          type: 'success',
+          title: `Сборка "${res.name}" импортирована!`,
+          message: `Создан отдельный экземпляр (${res.modsCount} модов, ${res.loader.toUpperCase()} ${res.minecraftVersion}) и выбран для запуска.`,
+        });
+      }
+    } catch (err: any) {
+      sounds.playError();
+      if (onShowToast) {
+        onShowToast({
+          type: 'error',
+          title: 'Ошибка импорта сборки',
+          message: err?.message || 'Не удалось импортировать файл .mrpack',
+        });
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handlePageChange = (newPage: number) => {
@@ -216,8 +276,21 @@ export const ModsView: React.FC<ModsViewProps> = ({
       );
 
       if (res && res.success) {
-        sounds.playPop();
         setInstalledIds((prev) => new Set([...prev, targetId]));
+
+        if (projectType === 'modpack') {
+          sounds.playLevelUp();
+          if (onShowToast) {
+            onShowToast({
+              type: 'success',
+              title: `Сборка "${mod.title}" установлена!`,
+              message: `Создан отдельный экземпляр "${res.filename || mod.title}" и выбран для запуска.`,
+            });
+          }
+          return;
+        }
+
+        sounds.playPop();
         const depsCount = res.dependencies?.length || 0;
 
         let typeLabel = 'Мод';
@@ -292,6 +365,8 @@ export const ModsView: React.FC<ModsViewProps> = ({
               <Sparkles className="w-6 h-6 text-amber-400" />
             ) : projectType === 'resourcepack' ? (
               <Palette className="w-6 h-6 text-cyan-400" />
+            ) : projectType === 'modpack' ? (
+              <Layers className="w-6 h-6 text-purple-400" />
             ) : (
               <Package className="w-6 h-6 text-emerald-400" />
             )}
@@ -300,12 +375,14 @@ export const ModsView: React.FC<ModsViewProps> = ({
                 ? 'Каталог шейдеров Modrinth'
                 : projectType === 'resourcepack'
                 ? 'Каталог текстурпаков Modrinth'
+                : projectType === 'modpack'
+                ? 'Каталог сборок Modrinth (.mrpack)'
                 : 'Каталог модов Modrinth'}
             </span>
           </h1>
 
           {/* Active instance target badge */}
-          {activeInstance && (
+          {activeInstance && projectType !== 'modpack' && (
             <div className="flex items-center gap-2 mt-1">
               <span className="text-xs text-slate-400">Экземпляр:</span>
               <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-semibold shadow-inner">
@@ -318,42 +395,91 @@ export const ModsView: React.FC<ModsViewProps> = ({
               </span>
             </div>
           )}
+          {projectType === 'modpack' && (
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs text-purple-300">
+                Сборки устанавливаются в новые изолированные экземпляры с полной конфигурацией
+              </span>
+            </div>
+          )}
         </div>
 
-        {/* Project type filter */}
-        <div className="flex items-center p-1 rounded-2xl bg-white/[0.03] border border-white/[0.06] text-xs">
-          <button
-            onClick={() => handleTypeChange('mod')}
-            className={`px-3.5 py-1.5 rounded-xl font-bold transition-colors ${
-              projectType === 'mod'
-                ? 'bg-emerald-500/20 text-emerald-300 shadow-sm border border-emerald-500/30'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Моды
-          </button>
-          <button
-            onClick={() => handleTypeChange('shader')}
-            className={`px-3.5 py-1.5 rounded-xl font-bold transition-colors ${
-              projectType === 'shader'
-                ? 'bg-amber-500/20 text-amber-300 shadow-sm border border-amber-500/30'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Шейдеры
-          </button>
-          <button
-            onClick={() => handleTypeChange('resourcepack')}
-            className={`px-3.5 py-1.5 rounded-xl font-bold transition-colors ${
-              projectType === 'resourcepack'
-                ? 'bg-cyan-500/20 text-cyan-300 shadow-sm border border-cyan-500/30'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Текстурпаки
-          </button>
+        <div className="flex items-center gap-2.5">
+          {projectType === 'modpack' && (
+            <button
+              onClick={handleImportMrpack}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/30 text-xs font-bold transition-all hover:scale-[1.02] active:scale-[0.98]"
+              title="Выбрать и распаковать файл .mrpack с диска"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>Импорт .mrpack</span>
+            </button>
+          )}
+
+          {/* Project type filter */}
+          <div className="flex items-center p-1 rounded-2xl bg-white/[0.03] border border-white/[0.06] text-xs">
+            <button
+              onClick={() => handleTypeChange('mod')}
+              className={`px-3 py-1.5 rounded-xl font-bold transition-colors ${
+                projectType === 'mod'
+                  ? 'bg-emerald-500/20 text-emerald-300 shadow-sm border border-emerald-500/30'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Моды
+            </button>
+            <button
+              onClick={() => handleTypeChange('modpack')}
+              className={`px-3 py-1.5 rounded-xl font-bold transition-colors ${
+                projectType === 'modpack'
+                  ? 'bg-purple-500/20 text-purple-300 shadow-sm border border-purple-500/30'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Сборки (.mrpack)
+            </button>
+            <button
+              onClick={() => handleTypeChange('shader')}
+              className={`px-3 py-1.5 rounded-xl font-bold transition-colors ${
+                projectType === 'shader'
+                  ? 'bg-amber-500/20 text-amber-300 shadow-sm border border-amber-500/30'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Шейдеры
+            </button>
+            <button
+              onClick={() => handleTypeChange('resourcepack')}
+              className={`px-3 py-1.5 rounded-xl font-bold transition-colors ${
+                projectType === 'resourcepack'
+                  ? 'bg-cyan-500/20 text-cyan-300 shadow-sm border border-cyan-500/30'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Текстурпаки
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Modpack live installation progress banner */}
+      {packProgress && (
+        <div className="p-3.5 rounded-2xl bg-purple-500/10 border border-purple-500/30 backdrop-blur-md flex flex-col gap-2">
+          <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2 text-purple-300 font-bold">
+              <Sparkles className="w-4 h-4 animate-spin text-purple-400" />
+              <span>{packProgress.status}</span>
+            </div>
+            <span className="font-mono text-purple-200 font-bold">{packProgress.progress}%</span>
+          </div>
+          <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-purple-500 to-indigo-400 transition-all duration-300"
+              style={{ width: `${packProgress.progress}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Quick Search Chips */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none flex-shrink-0">
@@ -498,6 +624,8 @@ export const ModsView: React.FC<ModsViewProps> = ({
                           <Sparkles className="w-6 h-6 text-amber-400" />
                         ) : projectType === 'resourcepack' ? (
                           <Palette className="w-6 h-6 text-cyan-400" />
+                        ) : projectType === 'modpack' ? (
+                          <Layers className="w-6 h-6 text-purple-400" />
                         ) : (
                           <Package className="w-6 h-6" />
                         )}
@@ -547,18 +675,25 @@ export const ModsView: React.FC<ModsViewProps> = ({
                     className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl font-bold text-xs flex-shrink-0 transition-all ${
                       isInstalled
                         ? 'bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 hover:text-white'
+                        : projectType === 'modpack'
+                        ? 'bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-400 hover:to-indigo-400 text-white font-black shadow-[0_0_15px_rgba(168,85,247,0.3)] hover:scale-[1.02] active:scale-[0.98]'
                         : 'bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black shadow-[0_0_15px_rgba(16,185,129,0.3)] hover:scale-[1.02] active:scale-[0.98]'
                     } disabled:opacity-50`}
                   >
                     {isBusy ? (
                       <>
                         <Sparkles className="w-3.5 h-3.5 animate-spin" />
-                        <span>Скачивание...</span>
+                        <span>{projectType === 'modpack' ? 'Установка...' : 'Скачивание...'}</span>
                       </>
                     ) : isInstalled ? (
                       <>
                         <Check className="w-3.5 h-3.5 stroke-[3] text-emerald-400" />
                         <span>Установлен</span>
+                      </>
+                    ) : projectType === 'modpack' ? (
+                      <>
+                        <Layers className="w-3.5 h-3.5 stroke-[2.5]" />
+                        <span>Установить сборку</span>
                       </>
                     ) : (
                       <>

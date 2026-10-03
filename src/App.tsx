@@ -355,9 +355,42 @@ export const App: React.FC = () => {
       targetLoader
     );
 
-    await loadMods(targetInstId);
-    await loadInstances();
+    if (res?.instanceId) {
+      await loadInstances();
+      await handleSelectInstance(res.instanceId);
+    } else {
+      await loadMods(targetInstId);
+      await loadInstances();
+    }
     return res;
+  };
+
+  const handleImportMrpack = async () => {
+    sounds.playClick();
+    const api = (window as any).electronAPI;
+    if (!api?.selectMrpackFile || !api?.installMrpack) return;
+    try {
+      const filePath = await api.selectMrpackFile();
+      if (!filePath) return;
+      const res = await api.installMrpack({ filePath });
+      sounds.playLevelUp();
+      await loadInstances();
+      if (res.instanceId) {
+        await handleSelectInstance(res.instanceId);
+      }
+      showToast({
+        type: 'success',
+        title: `Сборка "${res.name}" импортирована!`,
+        message: `Создан отдельный экземпляр (${res.modsCount} модов, ${res.loader.toUpperCase()} ${res.minecraftVersion}) и выбран для запуска.`,
+      });
+    } catch (err: any) {
+      sounds.playError();
+      showToast({
+        type: 'error',
+        title: 'Ошибка импорта сборки',
+        message: err?.message || 'Не удалось импортировать .mrpack',
+      });
+    }
   };
 
   const handleToggleMod = async (filename: string, enable: boolean) => {
@@ -478,6 +511,7 @@ export const App: React.FC = () => {
               }}
               onDeleteInstance={handleDeleteInstance}
               onOpenInstanceFolder={(id) => handleOpenFolder('mods', id)}
+              onImportMrpack={handleImportMrpack}
             />
           )}
 

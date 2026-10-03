@@ -95,9 +95,11 @@ const electronAPI = {
   installFabricVersion: (minecraftVersion: string): Promise<any> => ipcRenderer.invoke('install-fabric-version', minecraftVersion),
 
   // Java & System
-  getInstalledJava: (): Promise<{ path: string; version: string; isDefault: boolean }[]> =>
+  getInstalledJava: (): Promise<{ path: string; version: string; isDefault: boolean; majorVersion?: number; isInternal?: boolean }[]> =>
     ipcRenderer.invoke('get-installed-java'),
   selectJavaFile: (): Promise<string | null> => ipcRenderer.invoke('select-java-file'),
+  downloadJavaRuntime: (majorVersion: number): Promise<{ success: boolean; path: string }> =>
+    ipcRenderer.invoke('download-java-runtime', majorVersion),
   getSystemInfo: (): Promise<{ totalMemory: number; freeMemory: number; platform: string }> =>
     ipcRenderer.invoke('get-system-info'),
 
@@ -139,8 +141,16 @@ const electronAPI = {
   // Modrinth integration
   searchModrinth: (query: string, options: { loader?: string; version?: string; projectType?: string; offset?: number; limit?: number }): Promise<{ hits: ModItem[]; total_hits: number }> =>
     ipcRenderer.invoke('search-modrinth', query, options),
-  installModrinthProject: (projectId: string, versionId?: string, projectType?: string, instanceId?: string, gameVersion?: string, loader?: string): Promise<{ success: boolean; filename: string; dependencies?: string[] }> =>
+  installModrinthProject: (projectId: string, versionId?: string, projectType?: string, instanceId?: string, gameVersion?: string, loader?: string): Promise<{ success: boolean; filename: string; dependencies?: string[]; instanceId?: string; modsCount?: number }> =>
     ipcRenderer.invoke('install-modrinth-project', projectId, versionId, projectType, instanceId, gameVersion, loader),
+  installMrpack: (opts: { projectId?: string; versionId?: string; filePath?: string }): Promise<{ success: boolean; instanceId: string; name: string; minecraftVersion: string; loader: string; modsCount: number }> =>
+    ipcRenderer.invoke('install-mrpack', opts),
+  selectMrpackFile: (): Promise<string | null> => ipcRenderer.invoke('select-mrpack-file'),
+  onMrpackProgress: (callback: (data: { status: string; progress: number; current?: number; total?: number }) => void) => {
+    const handler = (_event: any, data: any) => callback(data);
+    ipcRenderer.on('mrpack-progress', handler);
+    return () => ipcRenderer.removeListener('mrpack-progress', handler);
+  },
 
   // Mod manager
   getInstalledMods: (instanceId?: string): Promise<InstalledMod[]> => ipcRenderer.invoke('get-installed-mods', instanceId),

@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   FileCode,
   ShieldAlert,
+  Download,
 } from 'lucide-react';
 import { sounds } from '../utils/audio';
 import { LauncherConfig } from '../types';
@@ -68,6 +69,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         sounds.playSuccess();
         triggerSave({ javaPath: selected });
       }
+    }
+  };
+
+  const [downloadingJava, setDownloadingJava] = useState<number | null>(null);
+
+  const handleDownloadJava = async (major: number) => {
+    sounds.playClick();
+    const api = (window as any).electronAPI;
+    if (!api?.downloadJavaRuntime) return;
+    setDownloadingJava(major);
+    try {
+      const res = await api.downloadJavaRuntime(major);
+      sounds.playLevelUp();
+      const updated = await api.getInstalledJava();
+      setJavaList(updated || []);
+      if (res.path) {
+        triggerSave({ javaPath: res.path });
+      }
+    } catch (e: any) {
+      sounds.playError();
+      alert(`Ошибка при загрузке Java ${major}: ` + e.message);
+    } finally {
+      setDownloadingJava(null);
     }
   };
 
@@ -278,7 +302,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </select>
 
             {/* Java Compatibility Guide matrix */}
-            <div className="grid grid-cols-3 gap-2 text-center text-[10px] pt-1">
+            <div className="grid grid-cols-4 gap-2 text-center text-[10px] pt-1">
+              <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20">
+                <div className="font-bold text-purple-400">Java 25</div>
+                <div className="text-slate-400 mt-0.5">MC 26.3+ / 25w</div>
+              </div>
               <div className="p-2 rounded-xl bg-white/[0.02] border border-white/5">
                 <div className="font-bold text-emerald-400">Java 21</div>
                 <div className="text-slate-400 mt-0.5">MC 1.20.5+</div>
@@ -291,6 +319,43 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <div className="font-bold text-amber-400">Java 8</div>
                 <div className="text-slate-400 mt-0.5">MC 1.12.2 и старее</div>
               </div>
+            </div>
+
+            {/* Quick pre-download buttons & Auto-download notice */}
+            <div className="p-3 rounded-2xl bg-white/[0.02] border border-white/[0.06] space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-slate-300">
+                  Скачать портативную Java в 1 клик:
+                </span>
+                <span className="text-[10px] text-slate-500">Adoptium / Azul OpenJDK</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {[25, 21, 17, 8].map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => handleDownloadJava(v)}
+                    disabled={downloadingJava !== null}
+                    className={`px-2 py-1.5 rounded-xl text-[11px] font-bold border transition-all flex items-center justify-center gap-1 ${
+                      downloadingJava === v
+                        ? 'bg-purple-500/20 text-purple-300 border-purple-500/30 animate-pulse'
+                        : 'bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border-white/5'
+                    } disabled:opacity-50`}
+                  >
+                    {downloadingJava === v ? (
+                      <span>Загрузка...</span>
+                    ) : (
+                      <>
+                        <Download className="w-3 h-3 text-cyan-400" />
+                        <span>Java {v}</span>
+                      </>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                ✨ <span className="text-white font-semibold">Авто-загрузка:</span> ZLauncher автоматически скачает и запустит нужную версию Java (включая Java 25 для новых снимков), если она не установлена у вас или вашего друга.
+              </p>
             </div>
 
             <div className="space-y-1">
