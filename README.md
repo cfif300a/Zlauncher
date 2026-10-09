@@ -1,16 +1,23 @@
+# Zlauncher
+
 <p align="center">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="/program_info/org.prismlauncher.PrismLauncher.logo-darkmode.svg">
-  <source media="(prefers-color-scheme: light)" srcset="/program_info/org.prismlauncher.PrismLauncher.logo.svg">
-  <img alt="Prism Launcher" src="/program_info/org.prismlauncher.PrismLauncher.logo.svg" width="40%">
-</picture>
+  <img alt="Zlauncher" src="new_cat.png" width="200">
 </p>
 
-Fork of [Prism Launcher](https://github.com/PrismLauncher/PrismLauncher) enabling offline accounts without Microsoft authentication. Not affiliated with the official project.
+Кастомный майнкрафт лаунчер с поддержкой офлайн-аккаунтов, встроенными темами оформлений и красивым интерфейсом.
 
-## Download
+## 🚀 Особенности Zlauncher
+- 🎨 **Кастомные визуальные темы:** 
+  - **Sunset Amber** *(по умолчанию)*
+  - **Obsidian Violet**
+  - **Ocean Cyan**
+  - **Emerald Forest**
+  - **Modern Slate Dark**
+- ✨ **Бесшовный интерфейс:** Плавный градиент и точечный узор в тон выбранной темы.
+- 🐈 **Обновленный аватар:** Использование `new_cat.png` в качестве маскота.
+- ⚡ **Динамическая смена тем:** Моментальное переключение внешнего вида и подсветки инстансов на лету.
+- 🔑 **Офлайн-режим:** Возможность играть без обязательной авторизации через Microsoft.
 
-Get the latest release from the [**Releases Page**](https://github.com/Diegiwg/PrismLauncher-Cracked/releases).
+## 📦 Скачать
+Скачайте готовый архив в разделе [**Releases**](https://github.com/cfif300a/Zlauncher/releases).
 
-> [!WARNING]
-> DO NOT use official Microsoft/Mojang accounts with this launcher. This bypasses authentication and is intended for offline play only. Using with official servers may violate Minecraft's Terms of Service.
