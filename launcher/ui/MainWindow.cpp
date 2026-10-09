@@ -475,6 +475,8 @@ void MainWindow::retranslateUi()
         if (action->toolTip().contains("%1"))
             action->setToolTip(action->toolTip().arg(BuildConfig.LAUNCHER_DISPLAYNAME));
     }
+
+    setWindowTitle("Zlauncher");
 }
 
 MainWindow::~MainWindow() {}
