@@ -37,6 +37,7 @@
 #include <QApplication>
 #include <QDebug>
 #include <QPainter>
+#include <QPainterPath>
 #include <QTextLayout>
 #include <QTextOption>
 #include <QtMath>
@@ -46,6 +47,9 @@
 #include "BaseInstance.h"
 #include "InstanceList.h"
 #include "InstanceView.h"
+#include "Application.h"
+#include "ui/themes/ThemeManager.h"
+#include "ui/themes/ITheme.h"
 
 // Origin: Qt
 static void viewItemTextLayout(QTextLayout& textLayout, int lineWidth, qreal& height, qreal& widthUsed)
@@ -72,13 +76,53 @@ ListViewDelegate::ListViewDelegate(QObject* parent) : QStyledItemDelegate(parent
 
 void drawSelectionRect(QPainter* painter, const QStyleOptionViewItem& option, const QRect& rect)
 {
-    if ((option.state & QStyle::State_Selected))
-        painter->fillRect(rect, option.palette.brush(QPalette::Highlight));
-    else {
-        QColor backgroundColor = option.palette.color(QPalette::Window);
-        backgroundColor.setAlpha(160);
-        painter->fillRect(rect, QBrush(backgroundColor));
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true);
+
+    QRect cardRect = option.rect.adjusted(3, 3, -3, -3);
+    QPainterPath path;
+    path.addRoundedRect(cardRect, 10, 10);
+
+    QColor highlight = option.palette.color(QPalette::Highlight);
+    QColor base = option.palette.color(QPalette::Base);
+    QColor window = option.palette.color(QPalette::Window);
+
+    if ((option.state & QStyle::State_Selected)) {
+        // Мягкий плавный полупрозрачный градиент выделения под цвет текущей темы
+        QColor selStart = highlight;
+        selStart.setAlpha(120);
+        QColor selEnd = base.lighter(130);
+        selEnd.setAlpha(180);
+
+        QLinearGradient grad(cardRect.topLeft(), cardRect.bottomRight());
+        grad.setColorAt(0, selStart);
+        grad.setColorAt(1, selEnd);
+        painter->fillPath(path, grad);
+
+        // Изящная тонкая рамка с мягким свечением под цвет темы
+        QColor border = highlight;
+        border.setAlpha(220);
+        painter->setPen(QPen(border, 1.5));
+        painter->drawPath(path);
+    } else if ((option.state & QStyle::State_MouseOver)) {
+        QColor hoverColor = highlight;
+        hoverColor.setAlpha(45);
+        painter->fillPath(path, QBrush(hoverColor));
+        QColor border = highlight;
+        border.setAlpha(120);
+        painter->setPen(QPen(border, 1));
+        painter->drawPath(path);
+    } else {
+        QColor normalColor = base;
+        normalColor.setAlpha(140);
+        painter->fillPath(path, QBrush(normalColor));
+        QColor borderColor = window.lighter(130);
+        borderColor.setAlpha(70);
+        painter->setPen(QPen(borderColor, 1));
+        painter->drawPath(path);
     }
+
+    painter->restore();
 }
 
 void drawFocusRect(QPainter* painter, const QStyleOptionViewItem& option, const QRect& rect)
@@ -279,11 +323,7 @@ void ListViewDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opti
     QPalette::ColorGroup cg = opt.state & QStyle::State_Enabled ? QPalette::Normal : QPalette::Disabled;
     if (cg == QPalette::Normal && !(opt.state & QStyle::State_Active))
         cg = QPalette::Inactive;
-    if (opt.state & QStyle::State_Selected) {
-        painter->setPen(opt.palette.color(cg, QPalette::HighlightedText));
-    } else {
-        painter->setPen(opt.palette.color(cg, QPalette::Text));
-    }
+    painter->setPen(opt.palette.color(cg, QPalette::Text));
 
     // draw the text
     QTextOption textOption;

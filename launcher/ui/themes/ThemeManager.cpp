@@ -19,6 +19,7 @@
 #include "ThemeManager.h"
 
 #include <QApplication>
+#include <QWidget>
 #include <QDir>
 #include <QDirIterator>
 #include <QIcon>
@@ -26,11 +27,15 @@
 #include <QStyle>
 #include <QStyleFactory>
 #include "Exception.h"
+#include "ui/themes/AmberTheme.h"
 #include "ui/themes/BrightTheme.h"
 #include "ui/themes/CatPack.h"
 #include "ui/themes/CustomTheme.h"
 #include "ui/themes/DarkTheme.h"
+#include "ui/themes/EmeraldTheme.h"
+#include "ui/themes/OceanTheme.h"
 #include "ui/themes/SystemTheme.h"
+#include "ui/themes/VioletTheme.h"
 
 #include "Application.h"
 #include "settings/SettingsObject.h"
@@ -137,6 +142,10 @@ void ThemeManager::initializeWidgets()
     themeDebugLog() << "Loading Built-in Theme:" << addTheme(std::make_unique<SystemTheme>(m_defaultStyle, m_defaultPalette, true));
     auto darkThemeId = addTheme(std::make_unique<DarkTheme>());
     themeDebugLog() << "Loading Built-in Theme:" << darkThemeId;
+    themeDebugLog() << "Loading Built-in Theme:" << addTheme(std::make_unique<VioletTheme>());
+    themeDebugLog() << "Loading Built-in Theme:" << addTheme(std::make_unique<OceanTheme>());
+    themeDebugLog() << "Loading Built-in Theme:" << addTheme(std::make_unique<EmeraldTheme>());
+    themeDebugLog() << "Loading Built-in Theme:" << addTheme(std::make_unique<AmberTheme>());
     themeDebugLog() << "Loading Built-in Theme:" << addTheme(std::make_unique<BrightTheme>());
 
     themeDebugLog() << "<> Initializing System Widget Themes";
@@ -260,6 +269,11 @@ void ThemeManager::setApplicationTheme(const QString& name, bool initial)
         themeDebugLog() << "applying theme" << theme->name();
         theme->apply(initial);
         setTitlebarColorOfAllWindowsOnMac(qApp->palette().window().color());
+
+        for (QWidget* widget : QApplication::topLevelWidgets()) {
+            widget->setPalette(qApp->palette());
+            widget->update();
+        }
 
         m_logColors = theme->logColorScheme();
     } else {

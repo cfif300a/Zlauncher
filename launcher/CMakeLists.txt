@@ -870,6 +870,14 @@ SET(LAUNCHER_SOURCES
     ui/themes/CustomTheme.h
     ui/themes/DarkTheme.cpp
     ui/themes/DarkTheme.h
+    ui/themes/VioletTheme.cpp
+    ui/themes/VioletTheme.h
+    ui/themes/OceanTheme.cpp
+    ui/themes/OceanTheme.h
+    ui/themes/EmeraldTheme.cpp
+    ui/themes/EmeraldTheme.h
+    ui/themes/AmberTheme.cpp
+    ui/themes/AmberTheme.h
     ui/themes/ITheme.cpp
     ui/themes/ITheme.h
     ui/themes/HintOverrideProxyStyle.cpp

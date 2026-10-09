@@ -458,6 +458,33 @@ void InstanceView::paintEvent([[maybe_unused]] QPaintEvent* event)
     executeDelayedItemsLayout();
 
     QPainter painter(this->viewport());
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    QPalette pal = palette();
+    QColor windowCol = pal.color(QPalette::Window);
+    QColor baseCol = pal.color(QPalette::Base);
+    QColor highlightCol = pal.color(QPalette::Highlight);
+
+    // Draw smooth matching background gradient based on active theme palette
+    QLinearGradient bgGrad(0, 0, width(), height());
+    bgGrad.setColorAt(0.0, windowCol);
+    bgGrad.setColorAt(0.5, baseCol);
+    bgGrad.setColorAt(1.0, windowCol.darker(120));
+    painter.fillRect(rect(), bgGrad);
+
+    // Draw subtle translucent grid pattern in active theme highlight color
+    painter.save();
+    highlightCol.setAlpha(15);
+    QPen patternPen(highlightCol, 1, Qt::DotLine);
+    painter.setPen(patternPen);
+    int step = 28;
+    for (int x = 0; x < width(); x += step) {
+        painter.drawLine(x, 0, x, height());
+    }
+    for (int y = 0; y < height(); y += step) {
+        painter.drawLine(0, y, width(), y);
+    }
+    painter.restore();
 
     if (m_cat) {
         m_cat->paint(&painter, this->viewport()->rect());

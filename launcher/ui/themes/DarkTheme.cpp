@@ -50,31 +50,32 @@ QString DarkTheme::name()
 QPalette DarkTheme::colorScheme()
 {
     QPalette darkPalette;
-    darkPalette.setColor(QPalette::Window, QColor(49, 49, 49));
-    darkPalette.setColor(QPalette::WindowText, Qt::white);
-    darkPalette.setColor(QPalette::Base, QColor(34, 34, 34));
-    darkPalette.setColor(QPalette::AlternateBase, QColor(42, 42, 42));
-    darkPalette.setColor(QPalette::ToolTipBase, Qt::white);
-    darkPalette.setColor(QPalette::ToolTipText, Qt::white);
-    darkPalette.setColor(QPalette::Text, Qt::white);
-    darkPalette.setColor(QPalette::Button, QColor(48, 48, 48));
-    darkPalette.setColor(QPalette::ButtonText, Qt::white);
-    darkPalette.setColor(QPalette::BrightText, Qt::red);
-    darkPalette.setColor(QPalette::Link, QColor(47, 163, 198));
-    darkPalette.setColor(QPalette::Highlight, QColor(150, 219, 89));
-    darkPalette.setColor(QPalette::HighlightedText, Qt::black);
-    darkPalette.setColor(QPalette::PlaceholderText, Qt::darkGray);
+    // Base colors (Next-Gen Slate Dark)
+    darkPalette.setColor(QPalette::Window, QColor(18, 19, 28));
+    darkPalette.setColor(QPalette::WindowText, QColor(243, 244, 246));
+    darkPalette.setColor(QPalette::Base, QColor(24, 25, 37));
+    darkPalette.setColor(QPalette::AlternateBase, QColor(30, 31, 44));
+    darkPalette.setColor(QPalette::ToolTipBase, QColor(30, 31, 44));
+    darkPalette.setColor(QPalette::ToolTipText, QColor(243, 244, 246));
+    darkPalette.setColor(QPalette::Text, QColor(243, 244, 246));
+    darkPalette.setColor(QPalette::Button, QColor(33, 35, 52));
+    darkPalette.setColor(QPalette::ButtonText, QColor(243, 244, 246));
+    darkPalette.setColor(QPalette::BrightText, QColor(239, 68, 68));
+    darkPalette.setColor(QPalette::Link, QColor(139, 92, 246));
+    darkPalette.setColor(QPalette::Highlight, QColor(99, 102, 241));
+    darkPalette.setColor(QPalette::HighlightedText, Qt::white);
+    darkPalette.setColor(QPalette::PlaceholderText, QColor(156, 163, 175));
     return fadeInactive(darkPalette, fadeAmount(), fadeColor());
 }
 
 double DarkTheme::fadeAmount()
 {
-    return 0.5;
+    return 0.3;
 }
 
 QColor DarkTheme::fadeColor()
 {
-    return QColor(49, 49, 49);
+    return QColor(18, 19, 28);
 }
 
 bool DarkTheme::hasStyleSheet()
@@ -84,7 +85,104 @@ bool DarkTheme::hasStyleSheet()
 
 QString DarkTheme::appStyleSheet()
 {
-    return "QToolTip { color: #ffffff; background-color: #2a82da; border: 1px solid white; }";
+    return R"(
+        QWidget {
+            font-family: "Segoe UI", "Inter", sans-serif;
+            font-size: 9pt;
+        }
+        QMainWindow {
+            background-color: #12131C;
+        }
+        QToolBar {
+            background: #181925;
+            border: none;
+            padding: 4px;
+            spacing: 6px;
+        }
+        QToolButton {
+            background: transparent;
+            color: #F3F4F6;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-weight: 500;
+        }
+        QToolButton:hover {
+            background-color: #2D2F45;
+            border: 1px solid #373A53;
+        }
+        QToolButton:pressed {
+            background-color: #4F46E5;
+            color: #FFFFFF;
+        }
+        QLineEdit, QSpinBox, QComboBox {
+            background-color: #1E1F2C;
+            color: #F3F4F6;
+            border: 1px solid #2D2F45;
+            border-radius: 6px;
+            padding: 5px 8px;
+            selection-background-color: #6366F1;
+        }
+        QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
+            border: 1px solid #6366F1;
+        }
+        QPushButton {
+            background-color: #2D2F45;
+            color: #F3F4F6;
+            border: 1px solid #373A53;
+            border-radius: 6px;
+            padding: 6px 14px;
+            font-weight: 600;
+        }
+        QPushButton:hover {
+            background-color: #373A53;
+            border: 1px solid #4F46E5;
+        }
+        QPushButton:pressed {
+            background-color: #4F46E5;
+            border-color: #6366F1;
+        }
+        QScrollBar:vertical {
+            border: none;
+            background: #12131C;
+            width: 8px;
+            margin: 0px;
+            border-radius: 4px;
+        }
+        QScrollBar::handle:vertical {
+            background: #2D2F45;
+            min-height: 20px;
+            border-radius: 4px;
+        }
+        QScrollBar::handle:vertical:hover {
+            background: #4F46E5;
+        }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            height: 0px;
+        }
+        QMenu {
+            background-color: #1E1F2C;
+            color: #F3F4F6;
+            border: 1px solid #2D2F45;
+            border-radius: 8px;
+            padding: 4px;
+        }
+        QMenu::item {
+            padding: 6px 20px;
+            border-radius: 4px;
+        }
+        QMenu::item:selected {
+            background-color: #6366F1;
+            color: #FFFFFF;
+        }
+        QToolTip {
+            color: #F3F4F6;
+            background-color: #1E1F2C;
+            border: 1px solid #4F46E5;
+            border-radius: 6px;
+            padding: 4px 8px;
+        }
+    )";
 }
 
 QString DarkTheme::tooltip()

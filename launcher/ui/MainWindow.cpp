@@ -150,9 +150,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     ui->setupUi(this);
 
     setWindowIcon(APPLICATION->logo());
-    setWindowTitle(APPLICATION->applicationDisplayName());
+    setWindowTitle("Zlauncher");
 #ifndef QT_NO_ACCESSIBILITY
-    setAccessibleName(BuildConfig.LAUNCHER_DISPLAYNAME);
+    setAccessibleName("Zlauncher");
 #endif
 
     // instance toolbar stuff
