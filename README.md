@@ -1,10 +1,14 @@
 # Zlauncher
 
 <p align="center">
-  <img alt="Zlauncher" src="new_cat.png" width="200">
+  <img alt="Zlauncher" src="new_cat.png" width="160">
 </p>
 
 Кастомный майнкрафт лаунчер с поддержкой офлайн-аккаунтов, встроенными темами оформлений и красивым интерфейсом.
+
+<p align="center">
+  <img alt="Zlauncher Preview" src="screenshot-1.png" width="800">
+</p>
 
 ## 🚀 Особенности Zlauncher
 - 🎨 **Кастомные визуальные темы:** 
