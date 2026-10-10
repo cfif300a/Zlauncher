@@ -152,10 +152,68 @@ QString AmberTheme::appStyleSheet() {
             border-top-left-radius: 8px;
             border-top-right-radius: 8px;
         }
-        QTabBar::tab:selected {
-            background: #D97706;
-            color: #FFFFFF;
+        /* Zlauncher ULTRA Special Components */
+        QWidget#ultraSidebar {
+            background-color: rgba(14, 10, 8, 0.75);
+            border-right: 1px solid rgba(245, 158, 11, 0.2);
+        }
+        QPushButton#ultraCreateBtn {
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #F59E0B, stop:1 #D97706);
+            color: #000000;
             font-weight: bold;
+            font-size: 10pt;
+            border-radius: 10px;
+            padding: 10px 14px;
+            border: none;
+        }
+        QPushButton#ultraCreateBtn:hover {
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #FBBF24, stop:1 #F59E0B);
+        }
+        QPushButton#ultraNavBtn {
+            background: transparent;
+            color: rgba(254, 243, 199, 0.8);
+            text-align: left;
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid transparent;
+            font-size: 9.5pt;
+        }
+        QPushButton#ultraNavBtn:hover {
+            background: rgba(245, 158, 11, 0.15);
+            color: #FFFFFF;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+        QPushButton#ultraNavBtn[active="true"] {
+            background: rgba(245, 158, 11, 0.25);
+            color: #FBBF24;
+            font-weight: bold;
+            border: 1px solid #D97706;
+        }
+        QWidget#ultraProfileCard {
+            background: rgba(36, 25, 18, 0.6);
+            border: 1px solid rgba(245, 158, 11, 0.25);
+            border-radius: 10px;
+        }
+        QWidget#ultraActionDock {
+            background: rgba(24, 17, 13, 0.85);
+            border: 1px solid rgba(245, 158, 11, 0.35);
+            border-radius: 16px;
+        }
+        QPushButton#ultraPlayBtn {
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #F59E0B, stop:1 #D97706);
+            color: #000000;
+            font-size: 13pt;
+            font-weight: bold;
+            border-radius: 14px;
+            border: 1px solid #FBBF24;
+        }
+        QPushButton#ultraPlayBtn:hover {
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #FBBF24, stop:1 #F59E0B);
+        }
+        QPushButton#ultraPlayBtn:disabled {
+            background: rgba(74, 48, 33, 0.5);
+            color: rgba(254, 243, 199, 0.4);
+            border: 1px solid rgba(217, 119, 6, 0.2);
         }
     )";
 }

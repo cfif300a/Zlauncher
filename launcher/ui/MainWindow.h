@@ -43,6 +43,7 @@
 #include <memory>
 
 #include <QMainWindow>
+#include <QPushButton>
 #include <QProcess>
 #include <QTimer>
 
@@ -52,6 +53,7 @@
 class LaunchController;
 class NewsChecker;
 class QToolButton;
+class QPushButton;
 class InstanceProxyModel;
 class LabeledToolButton;
 class QLabel;
@@ -242,6 +244,17 @@ class MainWindow : public QMainWindow {
     LabeledToolButton* renameButton = nullptr;
     QToolButton* helpMenuButton = nullptr;
     KonamiCode* secretEventFilter = nullptr;
+
+    // ULTRA UI Components
+    QWidget* m_sidebarWidget = nullptr;
+    QWidget* m_dashboardWidget = nullptr;
+    QWidget* m_actionDockWidget = nullptr;
+    QPushButton* m_playButton = nullptr;
+    QLabel* m_selectedInstanceTitleLabel = nullptr;
+    QLabel* m_selectedInstanceDescLabel = nullptr;
+    QLabel* m_ramWidgetValueLabel = nullptr;
+    QLabel* m_loaderWidgetValueLabel = nullptr;
+    QLabel* m_modsWidgetValueLabel = nullptr;
 
     std::shared_ptr<Setting> instanceToolbarSetting = nullptr;
 

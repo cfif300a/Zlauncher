@@ -374,7 +374,7 @@ QSize ListViewDelegate::sizeHint(const QStyleOptionViewItem& option, const QMode
     QSize szz = viewItemTextSize(&opt);
     height += szz.height();
     // FIXME: maybe the icon items could scale and keep proportions?
-    QSize sz(100, height);
+    QSize sz(140, height);
     return sz;
 }
 

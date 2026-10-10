@@ -291,14 +291,91 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     // Create the instance list widget
     {
-        view = new InstanceView(ui->centralWidget);
+        // Construct Zlauncher ULTRA layout
+        m_sidebarWidget = new QWidget(ui->centralWidget);
+        m_sidebarWidget->setObjectName("ultraSidebar");
+        m_sidebarWidget->setFixedWidth(220);
 
+        QVBoxLayout* sidebarLayout = new QVBoxLayout(m_sidebarWidget);
+        sidebarLayout->setContentsMargins(14, 16, 14, 16);
+        sidebarLayout->setSpacing(10);
+
+        QLabel* logoLabel = new QLabel("ZLAUNCHER <font color='#00F2FE'>ULTRA</font>", m_sidebarWidget);
+        logoLabel->setTextFormat(Qt::RichText);
+        QFont logoFont("Segoe UI", 13, QFont::Bold);
+        logoLabel->setFont(logoFont);
+        sidebarLayout->addWidget(logoLabel);
+
+        QPushButton* sidebarCreateBtn = new QPushButton(tr("+ СОЗДАТЬ ЭКЗЕМПЛЯР"), m_sidebarWidget);
+        sidebarCreateBtn->setObjectName("ultraCreateBtn");
+        connect(sidebarCreateBtn, &QPushButton::clicked, this, &MainWindow::on_actionAddInstance_triggered);
+        sidebarLayout->addWidget(sidebarCreateBtn);
+
+        QLabel* navHeader = new QLabel(tr("МЕНЮ ЛАУНЧЕРА"), m_sidebarWidget);
+        navHeader->setStyleSheet("color: rgba(255, 255, 255, 0.4); font-size: 8pt; font-weight: bold; margin-top: 10px;");
+        sidebarLayout->addWidget(navHeader);
+
+        auto addNavBtn = [this, sidebarLayout](const QString& text, const QString& iconName, std::function<void()> onClick, bool active = false) {
+            QPushButton* btn = new QPushButton(text, m_sidebarWidget);
+            btn->setObjectName("ultraNavBtn");
+            if (active) {
+                btn->setProperty("active", true);
+            }
+            if (!iconName.isEmpty()) {
+                btn->setIcon(QIcon::fromTheme(iconName));
+            }
+            connect(btn, &QPushButton::clicked, onClick);
+            sidebarLayout->addWidget(btn);
+            return btn;
+        };
+
+        addNavBtn(tr("🏠 Главная"), "", [] {}, true);
+        addNavBtn(tr("📦 Экземпляры"), "news", [] {});
+        addNavBtn(tr("⚡ Загрузчики"), "", [] {});
+        addNavBtn(tr("🏷 Версии"), "", [] {});
+        addNavBtn(tr("🎨 Моды & Шейдеры"), "", [] {});
+        addNavBtn(tr("📂 Мои моды"), "", [this] { on_actionViewCentralModsFolder_triggered(); });
+        addNavBtn(tr("👕 Скины и плащи"), "", [this] { on_actionViewSkinsFolder_triggered(); });
+        addNavBtn(tr("🌐 Серверы"), "", [] {});
+        addNavBtn(tr("⚙ Настройки"), "settings", [this] { on_actionSettings_triggered(); });
+
+        sidebarLayout->addStretch();
+
+        // Player profile card at bottom of sidebar
+        QWidget* profileCard = new QWidget(m_sidebarWidget);
+        profileCard->setObjectName("ultraProfileCard");
+        QHBoxLayout* profileLayout = new QHBoxLayout(profileCard);
+        profileLayout->setContentsMargins(8, 8, 8, 8);
+
+        QLabel* avatarIcon = new QLabel(profileCard);
+        avatarIcon->setPixmap(APPLICATION->logo().pixmap(32, 32));
+        profileLayout->addWidget(avatarIcon);
+
+        QVBoxLayout* profileTextLayout = new QVBoxLayout();
+        QLabel* profileName = new QLabel("Player", profileCard);
+        profileName->setStyleSheet("font-weight: bold; font-size: 9.5pt;");
+        QLabel* profileStatus = new QLabel("Офлайн / Пиратка", profileCard);
+        profileStatus->setStyleSheet("color: rgba(255, 255, 255, 0.5); font-size: 7.5pt;");
+        profileTextLayout->addWidget(profileName);
+        profileTextLayout->addWidget(profileStatus);
+        profileLayout->addLayout(profileTextLayout);
+
+        sidebarLayout->addWidget(profileCard);
+
+        ui->horizontalLayout->addWidget(m_sidebarWidget);
+
+        // Right Content Container
+        QWidget* rightContainer = new QWidget(ui->centralWidget);
+        QVBoxLayout* rightLayout = new QVBoxLayout(rightContainer);
+        rightLayout->setContentsMargins(12, 12, 12, 12);
+        rightLayout->setSpacing(12);
+
+        // Instance View Grid area
+        view = new InstanceView(rightContainer);
         view->setSelectionMode(QAbstractItemView::SingleSelection);
-        // FIXME: leaks ListViewDelegate
         auto delegate = new ListViewDelegate(this);
         view->setItemDelegate(delegate);
         view->setFrameShape(QFrame::NoFrame);
-        // do not show ugly blue border on the mac
         view->setAttribute(Qt::WA_MacShowFocusRect, false);
         connect(delegate, &ListViewDelegate::textChanged, this, [this](QString before, QString after) {
             if (auto newRoot = askToUpdateInstanceDirName(m_selectedInstance, before, after, this); !newRoot.isEmpty()) {
@@ -331,7 +408,37 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         view->setSourceOfGroupCollapseStatus(
             [](const QString& groupName) -> bool { return APPLICATION->instances()->isGroupCollapsed(groupName); });
         connect(view, &InstanceView::groupStateChanged, APPLICATION->instances(), &InstanceList::on_GroupStateChanged);
-        ui->horizontalLayout->addWidget(view);
+        rightLayout->addWidget(view, 1);
+
+        // Bottom ULTRA Action Dock
+        m_actionDockWidget = new QWidget(rightContainer);
+        m_actionDockWidget->setObjectName("ultraActionDock");
+        QHBoxLayout* dockLayout = new QHBoxLayout(m_actionDockWidget);
+        dockLayout->setContentsMargins(16, 12, 16, 12);
+
+        QVBoxLayout* dockInfoLayout = new QVBoxLayout();
+        QLabel* activeHeader = new QLabel(tr("АКТИВНЫЙ ЭКЗЕМПЛЯР"), m_actionDockWidget);
+        activeHeader->setStyleSheet("color: rgba(255, 255, 255, 0.5); font-size: 8pt; font-weight: bold;");
+        m_selectedInstanceTitleLabel = new QLabel(tr("Выберите экземпляр"), m_actionDockWidget);
+        m_selectedInstanceTitleLabel->setStyleSheet("font-size: 14pt; font-weight: bold; color: #00F2FE;");
+        m_selectedInstanceDescLabel = new QLabel(tr("Нажмите на сборку для выбора"), m_actionDockWidget);
+        m_selectedInstanceDescLabel->setStyleSheet("color: rgba(255, 255, 255, 0.7); font-size: 9pt;");
+        dockInfoLayout->addWidget(activeHeader);
+        dockInfoLayout->addWidget(m_selectedInstanceTitleLabel);
+        dockInfoLayout->addWidget(m_selectedInstanceDescLabel);
+
+        dockLayout->addLayout(dockInfoLayout, 1);
+
+        // Huge Neon Play Button
+        m_playButton = new QPushButton(tr("▶ ИГРАТЬ"), m_actionDockWidget);
+        m_playButton->setObjectName("ultraPlayBtn");
+        m_playButton->setMinimumSize(180, 52);
+        connect(m_playButton, &QPushButton::clicked, this, &MainWindow::on_actionLaunchInstance_triggered);
+        dockLayout->addWidget(m_playButton);
+
+        rightLayout->addWidget(m_actionDockWidget, 0);
+
+        ui->horizontalLayout->addWidget(rightContainer);
     }
     // The cat background
     {
@@ -606,6 +713,21 @@ void MainWindow::updateLaunchButton()
     if (m_selectedInstance)
         m_selectedInstance->populateLaunchMenu(launchMenu);
     ui->actionLaunchInstance->setMenu(launchMenu);
+
+    if (m_playButton) {
+        if (m_selectedInstance) {
+            if (m_selectedInstance->isRunning()) {
+                m_playButton->setText(tr("⏹ ЗАВЕРШИТЬ"));
+                m_playButton->setEnabled(true);
+            } else {
+                m_playButton->setText(tr("▶ ИГРАТЬ"));
+                m_playButton->setEnabled(m_selectedInstance->canLaunch());
+            }
+        } else {
+            m_playButton->setText(tr("▶ ИГРАТЬ"));
+            m_playButton->setEnabled(false);
+        }
+    }
 }
 
 void MainWindow::updateThemeMenu()
@@ -1682,6 +1804,13 @@ void MainWindow::instanceChanged(const QModelIndex& current, [[maybe_unused]] co
 
         updateLaunchButton();
 
+        if (m_selectedInstanceTitleLabel) {
+            m_selectedInstanceTitleLabel->setText(m_selectedInstance->name());
+        }
+        if (m_selectedInstanceDescLabel) {
+            m_selectedInstanceDescLabel->setText(m_selectedInstance->getStatusbarDescription());
+        }
+
         APPLICATION->settings()->set("SelectedInstance", m_selectedInstance->id());
 
         connect(m_selectedInstance, &BaseInstance::runningStatusChanged, this, &MainWindow::refreshCurrentInstance);
@@ -1712,6 +1841,12 @@ void MainWindow::selectionBad()
     // start by reseting everything...
     m_selectedInstance = nullptr;
     m_statusLeft->setText(tr("No instance selected"));
+    if (m_selectedInstanceTitleLabel) {
+        m_selectedInstanceTitleLabel->setText(tr("Экземпляр не выбран"));
+    }
+    if (m_selectedInstanceDescLabel) {
+        m_selectedInstanceDescLabel->setText(tr("Выберите экземпляр из списка для запуска"));
+    }
 
     statusBar()->clearMessage();
     ui->instanceToolBar->setEnabled(false);
