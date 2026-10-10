@@ -79,45 +79,45 @@ void drawSelectionRect(QPainter* painter, const QStyleOptionViewItem& option, co
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing, true);
 
-    QRect cardRect = option.rect.adjusted(3, 3, -3, -3);
+    QRect cardRect = option.rect.adjusted(4, 4, -4, -4);
     QPainterPath path;
-    path.addRoundedRect(cardRect, 10, 10);
+    path.addRoundedRect(cardRect, 14, 14);
 
     QColor highlight = option.palette.color(QPalette::Highlight);
     QColor base = option.palette.color(QPalette::Base);
     QColor window = option.palette.color(QPalette::Window);
 
     if ((option.state & QStyle::State_Selected)) {
-        // Мягкий плавный полупрозрачный градиент выделения под цвет текущей темы
+        // Современный плавный полупрозрачный градиент выделения с эффектом акрилового стекла
         QColor selStart = highlight;
-        selStart.setAlpha(120);
-        QColor selEnd = base.lighter(130);
-        selEnd.setAlpha(180);
+        selStart.setAlpha(150);
+        QColor selEnd = base.lighter(125);
+        selEnd.setAlpha(200);
 
         QLinearGradient grad(cardRect.topLeft(), cardRect.bottomRight());
         grad.setColorAt(0, selStart);
         grad.setColorAt(1, selEnd);
         painter->fillPath(path, grad);
 
-        // Изящная тонкая рамка с мягким свечением под цвет темы
+        // Яркая неоновая рамка со свечением
         QColor border = highlight;
-        border.setAlpha(220);
-        painter->setPen(QPen(border, 1.5));
+        border.setAlpha(245);
+        painter->setPen(QPen(border, 1.8));
         painter->drawPath(path);
     } else if ((option.state & QStyle::State_MouseOver)) {
         QColor hoverColor = highlight;
-        hoverColor.setAlpha(45);
+        hoverColor.setAlpha(60);
         painter->fillPath(path, QBrush(hoverColor));
         QColor border = highlight;
-        border.setAlpha(120);
-        painter->setPen(QPen(border, 1));
+        border.setAlpha(150);
+        painter->setPen(QPen(border, 1.2));
         painter->drawPath(path);
     } else {
         QColor normalColor = base;
-        normalColor.setAlpha(140);
+        normalColor.setAlpha(160);
         painter->fillPath(path, QBrush(normalColor));
-        QColor borderColor = window.lighter(130);
-        borderColor.setAlpha(70);
+        QColor borderColor = window.lighter(140);
+        borderColor.setAlpha(85);
         painter->setPen(QPen(borderColor, 1));
         painter->drawPath(path);
     }
