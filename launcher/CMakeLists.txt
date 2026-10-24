@@ -832,6 +832,12 @@ SET(LAUNCHER_SOURCES
     ui/GuiUtil.cpp
     ui/MainWindow.h
     ui/MainWindow.cpp
+    ui/ZTheme.h
+    ui/ZTheme.cpp
+    ui/widgets/ZTitleBar.h
+    ui/widgets/ZTitleBar.cpp
+    ui/widgets/ZHeroBanner.h
+    ui/widgets/ZHeroBanner.cpp
     ui/InstanceWindow.h
     ui/InstanceWindow.cpp
     ui/ViewLogWindow.h

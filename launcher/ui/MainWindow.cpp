@@ -72,6 +72,14 @@
 #include <QToolButton>
 #include <QWidget>
 #include <QWidgetAction>
+#include <QDateTime>
+#include <QLineEdit>
+#include <QLocale>
+#include <QMouseEvent>
+#include <QStackedWidget>
+#include <QTextBrowser>
+#include <QVBoxLayout>
+#include <QWindow>
 #include <memory>
 
 #include <BaseInstance.h>
@@ -111,6 +119,9 @@
 #include "ui/themes/ITheme.h"
 #include "ui/themes/ThemeManager.h"
 #include "ui/widgets/LabeledToolButton.h"
+#include "ui/widgets/ZHeroBanner.h"
+#include "ui/widgets/ZTitleBar.h"
+#include "ui/ZTheme.h"
 
 #include "minecraft/PackProfile.h"
 #include "minecraft/VersionFile.h"
@@ -244,10 +255,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         connect(ui->actionViewLog, &QAction::triggered, this, [] { APPLICATION->showLogWindow(); });
     }
 
-    // add the toolbar toggles to the view menu
-    ui->viewMenu->addAction(ui->instanceToolBar->toggleViewAction());
-    ui->viewMenu->addAction(ui->newsToolBar->toggleViewAction());
-
     updateThemeMenu();
     updateMainToolBar();
     // OSX magic.
@@ -289,157 +296,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         updateNewsLabel();
     }
 
-    // Create the instance list widget
-    {
-        // Construct Zlauncher ULTRA layout
-        m_sidebarWidget = new QWidget(ui->centralWidget);
-        m_sidebarWidget->setObjectName("ultraSidebar");
-        m_sidebarWidget->setFixedWidth(220);
+    // Build the Zlauncher shell: title bar, hero banner, library grid and news page
+    setupShell();
 
-        QVBoxLayout* sidebarLayout = new QVBoxLayout(m_sidebarWidget);
-        sidebarLayout->setContentsMargins(14, 16, 14, 16);
-        sidebarLayout->setSpacing(10);
-
-        QLabel* logoLabel = new QLabel("ZLAUNCHER <font color='#00F2FE'>ULTRA</font>", m_sidebarWidget);
-        logoLabel->setTextFormat(Qt::RichText);
-        QFont logoFont("Segoe UI", 13, QFont::Bold);
-        logoLabel->setFont(logoFont);
-        sidebarLayout->addWidget(logoLabel);
-
-        QPushButton* sidebarCreateBtn = new QPushButton(tr("+ СОЗДАТЬ ЭКЗЕМПЛЯР"), m_sidebarWidget);
-        sidebarCreateBtn->setObjectName("ultraCreateBtn");
-        connect(sidebarCreateBtn, &QPushButton::clicked, this, &MainWindow::on_actionAddInstance_triggered);
-        sidebarLayout->addWidget(sidebarCreateBtn);
-
-        QLabel* navHeader = new QLabel(tr("МЕНЮ ЛАУНЧЕРА"), m_sidebarWidget);
-        navHeader->setStyleSheet("color: rgba(255, 255, 255, 0.4); font-size: 8pt; font-weight: bold; margin-top: 10px;");
-        sidebarLayout->addWidget(navHeader);
-
-        auto addNavBtn = [this, sidebarLayout](const QString& text, const QString& iconName, std::function<void()> onClick, bool active = false) {
-            QPushButton* btn = new QPushButton(text, m_sidebarWidget);
-            btn->setObjectName("ultraNavBtn");
-            if (active) {
-                btn->setProperty("active", true);
-            }
-            if (!iconName.isEmpty()) {
-                btn->setIcon(QIcon::fromTheme(iconName));
-            }
-            connect(btn, &QPushButton::clicked, onClick);
-            sidebarLayout->addWidget(btn);
-            return btn;
-        };
-
-        addNavBtn(tr("🏠 Главная"), "", [] {}, true);
-        addNavBtn(tr("📦 Экземпляры"), "news", [] {});
-        addNavBtn(tr("⚡ Загрузчики"), "", [] {});
-        addNavBtn(tr("🏷 Версии"), "", [] {});
-        addNavBtn(tr("🎨 Моды & Шейдеры"), "", [] {});
-        addNavBtn(tr("📂 Мои моды"), "", [this] { on_actionViewCentralModsFolder_triggered(); });
-        addNavBtn(tr("👕 Скины и плащи"), "", [this] { on_actionViewSkinsFolder_triggered(); });
-        addNavBtn(tr("🌐 Серверы"), "", [] {});
-        addNavBtn(tr("⚙ Настройки"), "settings", [this] { on_actionSettings_triggered(); });
-
-        sidebarLayout->addStretch();
-
-        // Player profile card at bottom of sidebar
-        QWidget* profileCard = new QWidget(m_sidebarWidget);
-        profileCard->setObjectName("ultraProfileCard");
-        QHBoxLayout* profileLayout = new QHBoxLayout(profileCard);
-        profileLayout->setContentsMargins(8, 8, 8, 8);
-
-        QLabel* avatarIcon = new QLabel(profileCard);
-        avatarIcon->setPixmap(APPLICATION->logo().pixmap(32, 32));
-        profileLayout->addWidget(avatarIcon);
-
-        QVBoxLayout* profileTextLayout = new QVBoxLayout();
-        QLabel* profileName = new QLabel("Player", profileCard);
-        profileName->setStyleSheet("font-weight: bold; font-size: 9.5pt;");
-        QLabel* profileStatus = new QLabel("Офлайн / Пиратка", profileCard);
-        profileStatus->setStyleSheet("color: rgba(255, 255, 255, 0.5); font-size: 7.5pt;");
-        profileTextLayout->addWidget(profileName);
-        profileTextLayout->addWidget(profileStatus);
-        profileLayout->addLayout(profileTextLayout);
-
-        sidebarLayout->addWidget(profileCard);
-
-        ui->horizontalLayout->addWidget(m_sidebarWidget);
-
-        // Right Content Container
-        QWidget* rightContainer = new QWidget(ui->centralWidget);
-        QVBoxLayout* rightLayout = new QVBoxLayout(rightContainer);
-        rightLayout->setContentsMargins(12, 12, 12, 12);
-        rightLayout->setSpacing(12);
-
-        // Instance View Grid area
-        view = new InstanceView(rightContainer);
-        view->setSelectionMode(QAbstractItemView::SingleSelection);
-        auto delegate = new ListViewDelegate(this);
-        view->setItemDelegate(delegate);
-        view->setFrameShape(QFrame::NoFrame);
-        view->setAttribute(Qt::WA_MacShowFocusRect, false);
-        connect(delegate, &ListViewDelegate::textChanged, this, [this](QString before, QString after) {
-            if (auto newRoot = askToUpdateInstanceDirName(m_selectedInstance, before, after, this); !newRoot.isEmpty()) {
-                auto oldID = m_selectedInstance->id();
-                auto newID = QFileInfo(newRoot).fileName();
-                QString origGroup(APPLICATION->instances()->getInstanceGroup(oldID));
-                bool syncGroup = origGroup != GroupId() && oldID != newID;
-                if (syncGroup)
-                    APPLICATION->instances()->setInstanceGroup(oldID, GroupId());
-
-                refreshInstances();
-                setSelectedInstanceById(newID);
-
-                if (syncGroup)
-                    APPLICATION->instances()->setInstanceGroup(newID, origGroup);
-            }
-        });
-
-        view->installEventFilter(this);
-        view->setContextMenuPolicy(Qt::CustomContextMenu);
-        connect(view, &QWidget::customContextMenuRequested, this, &MainWindow::showInstanceContextMenu);
-        connect(view, &InstanceView::droppedURLs, this, &MainWindow::processURLs, Qt::QueuedConnection);
-
-        proxymodel = new InstanceProxyModel(this);
-        proxymodel->setSourceModel(APPLICATION->instances());
-        proxymodel->sort(0);
-        connect(proxymodel, &InstanceProxyModel::dataChanged, this, &MainWindow::instanceDataChanged);
-
-        view->setModel(proxymodel);
-        view->setSourceOfGroupCollapseStatus(
-            [](const QString& groupName) -> bool { return APPLICATION->instances()->isGroupCollapsed(groupName); });
-        connect(view, &InstanceView::groupStateChanged, APPLICATION->instances(), &InstanceList::on_GroupStateChanged);
-        rightLayout->addWidget(view, 1);
-
-        // Bottom ULTRA Action Dock
-        m_actionDockWidget = new QWidget(rightContainer);
-        m_actionDockWidget->setObjectName("ultraActionDock");
-        QHBoxLayout* dockLayout = new QHBoxLayout(m_actionDockWidget);
-        dockLayout->setContentsMargins(16, 12, 16, 12);
-
-        QVBoxLayout* dockInfoLayout = new QVBoxLayout();
-        QLabel* activeHeader = new QLabel(tr("АКТИВНЫЙ ЭКЗЕМПЛЯР"), m_actionDockWidget);
-        activeHeader->setStyleSheet("color: rgba(255, 255, 255, 0.5); font-size: 8pt; font-weight: bold;");
-        m_selectedInstanceTitleLabel = new QLabel(tr("Выберите экземпляр"), m_actionDockWidget);
-        m_selectedInstanceTitleLabel->setStyleSheet("font-size: 14pt; font-weight: bold; color: #00F2FE;");
-        m_selectedInstanceDescLabel = new QLabel(tr("Нажмите на сборку для выбора"), m_actionDockWidget);
-        m_selectedInstanceDescLabel->setStyleSheet("color: rgba(255, 255, 255, 0.7); font-size: 9pt;");
-        dockInfoLayout->addWidget(activeHeader);
-        dockInfoLayout->addWidget(m_selectedInstanceTitleLabel);
-        dockInfoLayout->addWidget(m_selectedInstanceDescLabel);
-
-        dockLayout->addLayout(dockInfoLayout, 1);
-
-        // Huge Neon Play Button
-        m_playButton = new QPushButton(tr("▶ ИГРАТЬ"), m_actionDockWidget);
-        m_playButton->setObjectName("ultraPlayBtn");
-        m_playButton->setMinimumSize(180, 52);
-        connect(m_playButton, &QPushButton::clicked, this, &MainWindow::on_actionLaunchInstance_triggered);
-        dockLayout->addWidget(m_playButton);
-
-        rightLayout->addWidget(m_actionDockWidget, 0);
-
-        ui->horizontalLayout->addWidget(rightContainer);
-    }
     // The cat background
     {
         // set the cat action priority here so you can still see the action in qt designer
@@ -700,7 +559,8 @@ void MainWindow::showInstanceContextMenu(const QPoint& pos)
 void MainWindow::updateMainToolBar()
 {
     ui->menuBar->setVisible(APPLICATION->settings()->get("MenuBarInsteadOfToolBar").toBool());
-    ui->mainToolBar->setVisible(ui->menuBar->isNativeMenuBar() || !APPLICATION->settings()->get("MenuBarInsteadOfToolBar").toBool());
+    // the shell title bar replaces the main toolbar
+    ui->mainToolBar->setVisible(false);
 }
 
 void MainWindow::updateLaunchButton()
@@ -714,20 +574,9 @@ void MainWindow::updateLaunchButton()
         m_selectedInstance->populateLaunchMenu(launchMenu);
     ui->actionLaunchInstance->setMenu(launchMenu);
 
-    if (m_playButton) {
-        if (m_selectedInstance) {
-            if (m_selectedInstance->isRunning()) {
-                m_playButton->setText(tr("⏹ ЗАВЕРШИТЬ"));
-                m_playButton->setEnabled(true);
-            } else {
-                m_playButton->setText(tr("▶ ИГРАТЬ"));
-                m_playButton->setEnabled(m_selectedInstance->canLaunch());
-            }
-        } else {
-            m_playButton->setText(tr("▶ ИГРАТЬ"));
-            m_playButton->setEnabled(false);
-        }
-    }
+    if (m_launchMenuButton)
+        m_launchMenuButton->setMenu(launchMenu);
+    updateHero();
 }
 
 void MainWindow::updateThemeMenu()
@@ -894,6 +743,36 @@ void MainWindow::defaultAccountChanged()
 
 bool MainWindow::eventFilter(QObject* obj, QEvent* ev)
 {
+    // resize the frameless window from the thin border around the shell
+    if (obj == ui->centralWidget && !isMaximized() && !isFullScreen() &&
+        (ev->type() == QEvent::HoverMove || ev->type() == QEvent::MouseButtonPress)) {
+        const QPoint pos = ev->type() == QEvent::HoverMove ? static_cast<QHoverEvent*>(ev)->position().toPoint()
+                                                           : static_cast<QMouseEvent*>(ev)->position().toPoint();
+        const int grip = 6;
+        const QRect r = ui->centralWidget->rect();
+        Qt::Edges edges;
+        if (pos.x() <= grip)
+            edges |= Qt::LeftEdge;
+        if (pos.x() >= r.width() - grip)
+            edges |= Qt::RightEdge;
+        if (pos.y() <= grip)
+            edges |= Qt::TopEdge;
+        if (ev->type() == QEvent::HoverMove) {
+            if (edges == (Qt::LeftEdge | Qt::TopEdge) || edges == (Qt::RightEdge | Qt::BottomEdge))
+                ui->centralWidget->setCursor(Qt::SizeFDiagCursor);
+            else if (edges == (Qt::RightEdge | Qt::TopEdge) || edges == (Qt::LeftEdge | Qt::BottomEdge))
+                ui->centralWidget->setCursor(Qt::SizeBDiagCursor);
+            else if (edges & (Qt::LeftEdge | Qt::RightEdge))
+                ui->centralWidget->setCursor(Qt::SizeHorCursor);
+            else if (edges & (Qt::TopEdge | Qt::BottomEdge))
+                ui->centralWidget->setCursor(Qt::SizeVerCursor);
+            else
+                ui->centralWidget->unsetCursor();
+        } else if (edges && windowHandle()) {
+            windowHandle()->startSystemResize(edges);
+            return true;
+        }
+    }
     if (obj == view) {
         if (ev->type() == QEvent::KeyPress) {
             secretEventFilter->input(ev);
@@ -940,6 +819,7 @@ void MainWindow::updateNewsLabel()
             ui->actionMoreNews->setVisible(false);
         }
     }
+    updateNewsPage();
 }
 
 QList<int> stringToIntList(const QString& string)
@@ -1345,6 +1225,7 @@ void MainWindow::iconUpdated(QString icon)
         auto new_icon = APPLICATION->icons()->getIcon(m_currentInstIcon);
         ui->actionChangeInstIcon->setIcon(new_icon);
         changeIconButton->setIcon(new_icon);
+        updateHero();
     }
 }
 
@@ -1716,6 +1597,14 @@ void MainWindow::changeEvent(QEvent* event)
     if (event->type() == QEvent::LanguageChange) {
         retranslateUi();
     }
+    if (event->type() == QEvent::WindowStateChange && m_titleBar) {
+        m_titleBar->updateMaximizeButton();
+#ifndef Q_OS_MAC
+        // no resize border while maximized
+        const int border = isMaximized() || isFullScreen() ? 0 : 4;
+        ui->horizontalLayout->setContentsMargins(border, border, border, 0);
+#endif
+    }
     QMainWindow::changeEvent(event);
 }
 
@@ -1804,12 +1693,6 @@ void MainWindow::instanceChanged(const QModelIndex& current, [[maybe_unused]] co
 
         updateLaunchButton();
 
-        if (m_selectedInstanceTitleLabel) {
-            m_selectedInstanceTitleLabel->setText(m_selectedInstance->name());
-        }
-        if (m_selectedInstanceDescLabel) {
-            m_selectedInstanceDescLabel->setText(m_selectedInstance->getStatusbarDescription());
-        }
 
         APPLICATION->settings()->set("SelectedInstance", m_selectedInstance->id());
 
@@ -1841,12 +1724,6 @@ void MainWindow::selectionBad()
     // start by reseting everything...
     m_selectedInstance = nullptr;
     m_statusLeft->setText(tr("No instance selected"));
-    if (m_selectedInstanceTitleLabel) {
-        m_selectedInstanceTitleLabel->setText(tr("Экземпляр не выбран"));
-    }
-    if (m_selectedInstanceDescLabel) {
-        m_selectedInstanceDescLabel->setText(tr("Выберите экземпляр из списка для запуска"));
-    }
 
     statusBar()->clearMessage();
     ui->instanceToolBar->setEnabled(false);
@@ -1920,4 +1797,390 @@ void MainWindow::refreshCurrentInstance()
 {
     auto current = view->selectionModel()->currentIndex();
     instanceChanged(current, current);
+}
+
+void MainWindow::setupShell()
+{
+    // Classic toolbars are replaced by the shell, but their actions stay alive for menus and shortcuts.
+    for (auto toolbar : { static_cast<QToolBar*>(ui->mainToolBar), static_cast<QToolBar*>(ui->instanceToolBar),
+                          static_cast<QToolBar*>(ui->newsToolBar) }) {
+        removeToolBar(toolbar);
+        toolbar->hide();
+    }
+    for (auto action : findChildren<QAction*>()) {
+        if (!action->shortcuts().isEmpty())
+            addAction(action);
+    }
+
+#ifndef Q_OS_MAC
+    setWindowFlag(Qt::FramelessWindowHint, true);
+    ui->horizontalLayout->setContentsMargins(4, 4, 4, 0);
+    ui->centralWidget->setAttribute(Qt::WA_Hover, true);
+    ui->centralWidget->installEventFilter(this);
+#endif
+
+    m_shell = new QWidget(ui->centralWidget);
+    m_shell->setObjectName("zShell");
+    m_shell->setAttribute(Qt::WA_StyledBackground, true);
+    ui->centralWidget->setObjectName("centralWidget");
+    setMinimumSize(960, 640);
+    resize(1220, 800);
+    setStyleSheet(ZTheme::mainWindowStyleSheet() +
+                  QString("#centralWidget { background: %1; }").arg(ZTheme::Background.name()));
+
+    auto shellLayout = new QVBoxLayout(m_shell);
+    shellLayout->setContentsMargins(0, 0, 0, 0);
+    shellLayout->setSpacing(0);
+    ui->horizontalLayout->addWidget(m_shell);
+
+    // title bar with brand, navigation and global actions
+    m_titleBar = new ZTitleBar(m_shell);
+    shellLayout->addWidget(m_titleBar);
+    {
+        auto bar = m_titleBar->contentLayout();
+
+        auto logo = new QLabel(m_titleBar);
+        logo->setPixmap(APPLICATION->logo().pixmap(28, 28));
+        bar->addWidget(logo);
+        auto brand = new QLabel(QString("ZLAUNCHER<span style='color:%1'>.</span>").arg(ZTheme::Accent.name()), m_titleBar);
+        brand->setObjectName("zBrand");
+        brand->setTextFormat(Qt::RichText);
+        bar->addWidget(brand);
+        bar->addSpacing(28);
+
+        auto tabs = new QButtonGroup(this);
+        auto addTab = [this, bar, tabs](const QString& text, int page) {
+            auto tab = new QToolButton(m_titleBar);
+            tab->setObjectName("zNavTab");
+            tab->setText(text);
+            tab->setCheckable(true);
+            tab->setChecked(page == 0);
+            tab->setCursor(Qt::PointingHandCursor);
+            tabs->addButton(tab, page);
+            bar->addWidget(tab);
+        };
+        addTab(tr("Библиотека"), 0);
+        addTab(tr("Новости"), 1);
+        connect(tabs, &QButtonGroup::idClicked, this, [this](int page) { m_pages->setCurrentIndex(page); });
+
+        bar->addStretch(1);
+
+        // plain buttons so retranslating the actions does not overwrite the labels
+        auto addTopButton = [this, bar](QAction* action, const QString& text) {
+            auto btn = new QToolButton(m_titleBar);
+            btn->setObjectName("zTopButton");
+            btn->setText(text);
+            btn->setToolTip(action->toolTip());
+            btn->setCursor(Qt::PointingHandCursor);
+            if (action->menu()) {
+                btn->setMenu(action->menu());
+                btn->setPopupMode(QToolButton::InstantPopup);
+            } else {
+                connect(btn, &QToolButton::clicked, action, &QAction::trigger);
+            }
+            bar->addWidget(btn);
+            return btn;
+        };
+        if (APPLICATION->updaterEnabled())
+            addTopButton(ui->actionCheckUpdate, tr("Обновить"));
+        addTopButton(ui->actionFoldersButton, tr("Папки"));
+        addTopButton(ui->actionHelpButton, tr("Помощь"));
+        addTopButton(ui->actionSettings, tr("Настройки"));
+
+        // the account button mirrors the accounts action, which tracks the active profile
+        m_accountButton = new QToolButton(m_titleBar);
+        m_accountButton->setObjectName("zTopButton");
+        m_accountButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        m_accountButton->setIconSize(QSize(20, 20));
+        m_accountButton->setPopupMode(QToolButton::InstantPopup);
+        m_accountButton->setCursor(Qt::PointingHandCursor);
+        auto syncAccount = [this] {
+            m_accountButton->setText(ui->actionAccountsButton->text());
+            m_accountButton->setIcon(ui->actionAccountsButton->icon());
+            m_accountButton->setMenu(ui->actionAccountsButton->menu());
+        };
+        connect(ui->actionAccountsButton, &QAction::changed, m_accountButton, syncAccount);
+        syncAccount();
+        bar->addWidget(m_accountButton);
+        bar->addSpacing(8);
+    }
+
+    m_pages = new QStackedWidget(m_shell);
+    shellLayout->addWidget(m_pages, 1);
+
+    // library page: hero + grid
+    auto library = new QWidget(m_pages);
+    library->setObjectName("zLibrary");
+    auto libraryLayout = new QVBoxLayout(library);
+    libraryLayout->setContentsMargins(22, 18, 22, 8);
+    libraryLayout->setSpacing(16);
+    m_pages->addWidget(library);
+
+    m_hero = new ZHeroBanner(library);
+    libraryLayout->addWidget(m_hero);
+    {
+        auto heroLayout = new QHBoxLayout(m_hero);
+        heroLayout->setContentsMargins(30, 26, 30, 26);
+        heroLayout->setSpacing(24);
+
+        m_heroIcon = new QLabel(m_hero);
+        m_heroIcon->setFixedSize(112, 112);
+        m_heroIcon->setAlignment(Qt::AlignCenter);
+        heroLayout->addWidget(m_heroIcon, 0, Qt::AlignVCenter);
+
+        auto info = new QVBoxLayout();
+        info->setSpacing(6);
+        m_heroKicker = new QLabel(m_hero);
+        m_heroKicker->setObjectName("zHeroKicker");
+        info->addWidget(m_heroKicker);
+        m_heroTitle = new QLabel(m_hero);
+        m_heroTitle->setObjectName("zHeroTitle");
+        info->addWidget(m_heroTitle);
+        m_heroChips = new QHBoxLayout();
+        m_heroChips->setSpacing(6);
+        info->addLayout(m_heroChips);
+        info->addSpacing(10);
+
+        auto actions = new QHBoxLayout();
+        actions->setSpacing(8);
+        m_playButton = new QPushButton(m_hero);
+        m_playButton->setObjectName("zPlay");
+        m_playButton->setFixedHeight(52);
+        m_playButton->setMinimumWidth(190);
+        m_playButton->setCursor(Qt::PointingHandCursor);
+        connect(m_playButton, &QPushButton::clicked, this, [this] {
+            if (m_selectedInstance && m_selectedInstance->isRunning())
+                on_actionKillInstance_triggered();
+            else
+                on_actionLaunchInstance_triggered();
+        });
+        actions->addWidget(m_playButton);
+
+        auto makeHeroButton = [this, actions](const QString& text, QAction* action) {
+            auto btn = new QToolButton(m_hero);
+            btn->setObjectName("zHeroAction");
+            btn->setText(text);
+            btn->setFixedHeight(52);
+            btn->setCursor(Qt::PointingHandCursor);
+            btn->setToolTip(action ? action->toolTip() : QString());
+            if (action) {
+                connect(btn, &QToolButton::clicked, action, &QAction::trigger);
+                connect(action, &QAction::changed, btn, [btn, action] { btn->setEnabled(action->isEnabled()); });
+                btn->setEnabled(action->isEnabled());
+            }
+            actions->addWidget(btn);
+            return btn;
+        };
+        m_launchMenuButton = makeHeroButton(QStringLiteral("▾"), nullptr);
+        m_launchMenuButton->setToolTip(tr("Другие способы запуска"));
+        m_launchMenuButton->setPopupMode(QToolButton::InstantPopup);
+        m_launchMenuButton->setFixedWidth(44);
+        makeHeroButton(tr("Настроить"), ui->actionEditInstance);
+        makeHeroButton(tr("Папка"), ui->actionViewSelectedInstFolder);
+
+        auto more = makeHeroButton(QStringLiteral("•••"), nullptr);
+        more->setToolTip(tr("Ещё"));
+        more->setPopupMode(QToolButton::InstantPopup);
+        auto moreMenu = new QMenu(more);
+        moreMenu->addAction(ui->actionRenameInstance);
+        moreMenu->addAction(ui->actionChangeInstIcon);
+        moreMenu->addAction(ui->actionChangeInstGroup);
+        moreMenu->addSeparator();
+        moreMenu->addAction(ui->actionCopyInstance);
+        moreMenu->addAction(ui->actionExportInstance);
+        moreMenu->addAction(ui->actionCreateInstanceShortcut);
+        moreMenu->addSeparator();
+        moreMenu->addAction(ui->actionDeleteInstance);
+        more->setMenu(moreMenu);
+        actions->addStretch(1);
+        info->addLayout(actions);
+
+        heroLayout->addLayout(info, 1);
+    }
+
+    // library header
+    {
+        auto header = new QHBoxLayout();
+        header->setSpacing(10);
+        auto title = new QLabel(tr("Библиотека"), library);
+        title->setObjectName("zSectionTitle");
+        header->addWidget(title);
+        m_libraryCount = new QLabel(library);
+        m_libraryCount->setObjectName("zSectionCount");
+        header->addWidget(m_libraryCount, 0, Qt::AlignBottom);
+        header->addStretch(1);
+
+        m_search = new QLineEdit(library);
+        m_search->setObjectName("zSearch");
+        m_search->setPlaceholderText(tr("Поиск сборок..."));
+        m_search->setClearButtonEnabled(true);
+        m_search->setFixedWidth(260);
+        header->addWidget(m_search);
+
+        auto refresh = new QPushButton(QStringLiteral("⟳"), library);
+        refresh->setToolTip(tr("Обновить список"));
+        refresh->setObjectName("zGhost");
+        refresh->setCursor(Qt::PointingHandCursor);
+        connect(refresh, &QPushButton::clicked, this, &MainWindow::refreshInstances);
+        header->addWidget(refresh);
+
+        auto create = new QPushButton(tr("+ Новая сборка"), library);
+        create->setObjectName("zPrimary");
+        create->setCursor(Qt::PointingHandCursor);
+        connect(create, &QPushButton::clicked, this, &MainWindow::on_actionAddInstance_triggered);
+        header->addWidget(create);
+
+        libraryLayout->addLayout(header);
+    }
+
+    // the instance grid
+    {
+        view = new InstanceView(library);
+        view->setSelectionMode(QAbstractItemView::SingleSelection);
+        auto delegate = new ListViewDelegate(this);
+        view->setItemDelegate(delegate);
+        view->setFrameShape(QFrame::NoFrame);
+        view->setAttribute(Qt::WA_MacShowFocusRect, false);
+        connect(delegate, &ListViewDelegate::textChanged, this, [this](QString before, QString after) {
+            if (auto newRoot = askToUpdateInstanceDirName(m_selectedInstance, before, after, this); !newRoot.isEmpty()) {
+                auto oldID = m_selectedInstance->id();
+                auto newID = QFileInfo(newRoot).fileName();
+                QString origGroup(APPLICATION->instances()->getInstanceGroup(oldID));
+                bool syncGroup = origGroup != GroupId() && oldID != newID;
+                if (syncGroup)
+                    APPLICATION->instances()->setInstanceGroup(oldID, GroupId());
+
+                refreshInstances();
+                setSelectedInstanceById(newID);
+
+                if (syncGroup)
+                    APPLICATION->instances()->setInstanceGroup(newID, origGroup);
+            }
+        });
+
+        view->installEventFilter(this);
+        view->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(view, &QWidget::customContextMenuRequested, this, &MainWindow::showInstanceContextMenu);
+        connect(view, &InstanceView::droppedURLs, this, &MainWindow::processURLs, Qt::QueuedConnection);
+
+        proxymodel = new InstanceProxyModel(this);
+        proxymodel->setSourceModel(APPLICATION->instances());
+        proxymodel->sort(0);
+        connect(proxymodel, &InstanceProxyModel::dataChanged, this, &MainWindow::instanceDataChanged);
+
+        view->setModel(proxymodel);
+        view->setSourceOfGroupCollapseStatus(
+            [](const QString& groupName) -> bool { return APPLICATION->instances()->isGroupCollapsed(groupName); });
+        connect(view, &InstanceView::groupStateChanged, APPLICATION->instances(), &InstanceList::on_GroupStateChanged);
+        proxymodel->setFilterCaseSensitivity(Qt::CaseInsensitive);
+        connect(m_search, &QLineEdit::textChanged, proxymodel, &QSortFilterProxyModel::setFilterFixedString);
+        connect(proxymodel, &QAbstractItemModel::rowsInserted, this, &MainWindow::updateLibraryCount);
+        connect(proxymodel, &QAbstractItemModel::rowsRemoved, this, &MainWindow::updateLibraryCount);
+        connect(proxymodel, &QAbstractItemModel::modelReset, this, &MainWindow::updateLibraryCount);
+        libraryLayout->addWidget(view, 1);
+    }
+
+    // news page
+    {
+        auto news = new QWidget(m_pages);
+        news->setObjectName("zNewsPage");
+        auto newsLayout = new QVBoxLayout(news);
+        newsLayout->setContentsMargins(22, 18, 22, 8);
+        auto title = new QLabel(tr("Новости"), news);
+        title->setObjectName("zSectionTitle");
+        newsLayout->addWidget(title);
+        m_newsBrowser = new QTextBrowser(news);
+        m_newsBrowser->setObjectName("zNews");
+        m_newsBrowser->setOpenExternalLinks(true);
+        newsLayout->addWidget(m_newsBrowser, 1);
+        m_pages->addWidget(news);
+    }
+
+    updateLibraryCount();
+    updateHero();
+}
+
+void MainWindow::updateLibraryCount()
+{
+    if (!m_libraryCount || !proxymodel)
+        return;
+    m_libraryCount->setText(QString::number(proxymodel->rowCount()));
+}
+
+void MainWindow::updateHero()
+{
+    if (!m_hero)
+        return;
+
+    QLayoutItem* item;
+    while ((item = m_heroChips->takeAt(0))) {
+        delete item->widget();
+        delete item;
+    }
+    auto addChip = [this](const QString& text) {
+        auto chip = new QLabel(text, m_hero);
+        chip->setObjectName("zChip");
+        m_heroChips->addWidget(chip);
+    };
+
+    if (!m_selectedInstance) {
+        m_heroKicker->setText(tr("ДОБРО ПОЖАЛОВАТЬ"));
+        m_heroTitle->setText(tr("Во что играем?"));
+        addChip(tr("Выбери сборку ниже или создай новую"));
+        m_heroChips->addStretch(1);
+        m_heroIcon->setPixmap(APPLICATION->logo().pixmap(96, 96));
+        m_hero->setInstanceIcon(APPLICATION->logo());
+        m_playButton->setText(tr("ИГРАТЬ"));
+        m_playButton->setEnabled(false);
+        m_playButton->setProperty("running", false);
+        m_launchMenuButton->setEnabled(false);
+        m_playButton->style()->polish(m_playButton);
+        return;
+    }
+
+    const bool running = m_selectedInstance->isRunning();
+    auto icon = APPLICATION->icons()->getIcon(m_selectedInstance->iconKey());
+    m_heroKicker->setText(running ? tr("СЕЙЧАС В ИГРЕ") : tr("ГОТОВО К ЗАПУСКУ"));
+    m_heroTitle->setText(m_heroTitle->fontMetrics().elidedText(m_selectedInstance->name(), Qt::ElideRight, 640));
+    m_heroIcon->setPixmap(icon.pixmap(96, 96));
+    m_hero->setInstanceIcon(icon);
+
+    auto meta = ZTheme::instanceMeta(m_selectedInstance);
+    if (!meta.gameVersion.isEmpty())
+        addChip(tr("Minecraft %1").arg(meta.gameVersion));
+    addChip(meta.loader.isEmpty() ? QStringLiteral("Vanilla") : meta.loader);
+    const bool noDays = APPLICATION->settings()->get("ShowGameTimeWithoutDays").toBool();
+    if (m_selectedInstance->totalTimePlayed() > 0)
+        addChip(tr("Наиграно: %1").arg(Time::prettifyDuration(m_selectedInstance->totalTimePlayed(), noDays)));
+    if (m_selectedInstance->lastLaunch() > 0)
+        addChip(tr("Последний запуск: %1").arg(QLocale().toString(QDateTime::fromMSecsSinceEpoch(m_selectedInstance->lastLaunch()).date(),
+                                                       QLocale::ShortFormat)));
+    m_heroChips->addStretch(1);
+
+    m_playButton->setText(running ? tr("СТОП") : tr("ИГРАТЬ"));
+    m_playButton->setEnabled(running || m_selectedInstance->canLaunch());
+    m_playButton->setProperty("running", running);
+    m_playButton->style()->polish(m_playButton);
+    m_launchMenuButton->setEnabled(!running && m_selectedInstance->canLaunch());
+}
+
+void MainWindow::updateNewsPage()
+{
+    if (!m_newsBrowser)
+        return;
+    if (m_newsChecker->isLoadingNews()) {
+        m_newsBrowser->setHtml(QString("<p style='color:%1'>%2</p>").arg(ZTheme::TextMuted.name(), tr("Загружаем новости...")));
+        return;
+    }
+    auto entries = m_newsChecker->getNewsEntries();
+    if (entries.isEmpty()) {
+        m_newsBrowser->setHtml(QString("<p style='color:%1'>%2</p>").arg(ZTheme::TextMuted.name(), tr("Новостей пока нет.")));
+        return;
+    }
+    QString html;
+    for (const auto& entry : entries) {
+        html += QString("<h2><a style='color:%1; text-decoration:none' href='%2'>%3</a></h2>%4<hr/>")
+                    .arg(ZTheme::Accent.name(), entry->link.toHtmlEscaped(), entry->title.toHtmlEscaped(), entry->content);
+    }
+    m_newsBrowser->setHtml(html);
 }

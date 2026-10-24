@@ -54,6 +54,12 @@ class LaunchController;
 class NewsChecker;
 class QToolButton;
 class QPushButton;
+class QStackedWidget;
+class QHBoxLayout;
+class QLineEdit;
+class QTextBrowser;
+class ZTitleBar;
+class ZHeroBanner;
 class InstanceProxyModel;
 class LabeledToolButton;
 class QLabel;
@@ -221,6 +227,11 @@ class MainWindow : public QMainWindow {
    private:
     void retranslateUi();
 
+    void setupShell();
+    void updateHero();
+    void updateLibraryCount();
+    void updateNewsPage();
+
     void addInstance(const QString& url = QString(), const QMap<QString, QString>& extra_info = {});
     void activateInstance(BaseInstance* instance);
     void setCatBackground(bool enabled);
@@ -245,16 +256,21 @@ class MainWindow : public QMainWindow {
     QToolButton* helpMenuButton = nullptr;
     KonamiCode* secretEventFilter = nullptr;
 
-    // ULTRA UI Components
-    QWidget* m_sidebarWidget = nullptr;
-    QWidget* m_dashboardWidget = nullptr;
-    QWidget* m_actionDockWidget = nullptr;
+    // Zlauncher shell
+    QWidget* m_shell = nullptr;
+    ZTitleBar* m_titleBar = nullptr;
+    QStackedWidget* m_pages = nullptr;
+    ZHeroBanner* m_hero = nullptr;
+    QLabel* m_heroIcon = nullptr;
+    QLabel* m_heroKicker = nullptr;
+    QLabel* m_heroTitle = nullptr;
+    QHBoxLayout* m_heroChips = nullptr;
     QPushButton* m_playButton = nullptr;
-    QLabel* m_selectedInstanceTitleLabel = nullptr;
-    QLabel* m_selectedInstanceDescLabel = nullptr;
-    QLabel* m_ramWidgetValueLabel = nullptr;
-    QLabel* m_loaderWidgetValueLabel = nullptr;
-    QLabel* m_modsWidgetValueLabel = nullptr;
+    QToolButton* m_launchMenuButton = nullptr;
+    QToolButton* m_accountButton = nullptr;
+    QLabel* m_libraryCount = nullptr;
+    QLineEdit* m_search = nullptr;
+    QTextBrowser* m_newsBrowser = nullptr;
 
     std::shared_ptr<Setting> instanceToolbarSetting = nullptr;
 
